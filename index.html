@@ -4487,29 +4487,18 @@ function hashPin(pin){
   return String(h);
 }
 
-// Admin-Passwort — fest hinterlegt als Fallback
+// Admin-Passwort — fest hinterlegt, gilt immer
 const ADMIN_HASH_DEFAULT = '1689278';
+// Alten gespeicherten Hash löschen damit immer das eingebaute PW gilt
+localStorage.removeItem('bm_admin_pw');
 
 async function getAdminHash(){
-  // Zuerst lokal prüfen
-  const local = localStorage.getItem('bm_admin_pw');
-  if(local) return local;
-  // Dann Supabase
-  try {
-    const res = await fetch(`${SB_URL}/rest/v1/settings?key=eq.admin_pw&select=value`, {headers:sbHeaders});
-    if(res.ok){
-      const rows = await res.json();
-      if(rows.length){
-        localStorage.setItem('bm_admin_pw', rows[0].value);
-        return rows[0].value;
-      }
-    }
-  } catch(e){}
-  // Fallback: eingebautes Passwort
+  // Eingebautes Passwort hat immer Vorrang
   return ADMIN_HASH_DEFAULT;
 }
 
 async function setAdminHash(pw){
+  // Nur lokal speichern (für künftige Passwortänderungen)
   const hash = hashPin(pw);
   localStorage.setItem('bm_admin_pw', hash);
   try {
@@ -4518,7 +4507,7 @@ async function setAdminHash(pw){
       headers:{...sbHeaders,'Prefer':'resolution=merge-duplicates'},
       body:JSON.stringify({key:'admin_pw', value:hash})
     });
-  } catch(e){ console.warn('Supabase settings save failed:', e); }
+  } catch(e){}
 }
 
 async function showLoginScreen(){
