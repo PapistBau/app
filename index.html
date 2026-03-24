@@ -593,6 +593,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <!-- PIN View -->
     <div id="login-pin-view">
       <div style="font-size:15px;font-weight:600;text-align:center;margin-bottom:4px" id="login-prompt">PIN eingeben</div>
+      <div style="font-size:12px;color:var(--t2);text-align:center;margin-bottom:20px" id="login-sub">Mitarbeiter-PIN oder Admin-Passwort</div>
       <div style="font-size:12px;color:var(--t2);text-align:center;margin-bottom:20px">Mitarbeiter-PIN oder Admin-Passwort</div>
       <div style="display:flex;justify-content:center;gap:14px;margin-bottom:24px" id="pin-dots">
         <div class="pin-dot" id="dot-0"></div><div class="pin-dot" id="dot-1"></div>
@@ -4500,24 +4501,36 @@ async function showLoginScreen(){
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('main-app').style.display='none';
   document.getElementById('ma-app').style.display='none';
-  // Erstmal PIN-View zeigen mit Ladehinweis
+  // Immer PIN-View zeigen während geladen wird
   document.getElementById('login-pin-view').style.display='block';
   document.getElementById('login-admin-view').style.display='none';
   document.getElementById('login-setup-view').style.display='none';
   document.getElementById('login-prompt').textContent='⏳ Verbinde …';
+  document.getElementById('login-sub').textContent='';
   pinBuffer='';
   updatePinDots();
-  // Aus Supabase laden (async)
+
   const hash = await getAdminHash();
   if(!hash){
-    // Wirklich kein Passwort — Setup anzeigen
-    document.getElementById('login-pin-view').style.display='none';
-    document.getElementById('login-setup-view').style.display='flex';
+    // Kein Passwort in Supabase → Setup nur wenn lokal noch nie eingerichtet
+    // Sicherheit: Setup-Screen nur wenn explizit via URL-Parameter ?setup=1
+    const isSetup = new URLSearchParams(window.location.search).get('setup')==='1';
+    if(isSetup){
+      document.getElementById('login-pin-view').style.display='none';
+      document.getElementById('login-setup-view').style.display='flex';
+    } else {
+      // Normaler Benutzer: nur Admin-Login anzeigen
+      document.getElementById('login-pin-view').style.display='none';
+      document.getElementById('login-admin-view').style.display='block';
+      document.getElementById('admin-login-error').textContent='';
+      // Hinweis: Ersten Start über ?setup=1 machen
+      document.getElementById('admin-login-error').textContent='Noch kein Passwort gesetzt. Öffne die App mit ?setup=1 am Ende der URL.';
+      document.getElementById('admin-login-error').style.color='var(--accent)';
+    }
   } else {
-    // Passwort vorhanden — PIN-View anzeigen
     document.getElementById('login-pin-view').style.display='block';
-    document.getElementById('login-setup-view').style.display='none';
     document.getElementById('login-prompt').textContent='PIN eingeben';
+    document.getElementById('login-sub').textContent='Mitarbeiter-PIN oder Admin-Passwort';
   }
 }
 
