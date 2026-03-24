@@ -545,6 +545,9 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 /* Touch-Optimierung - verhindert Delay auf Mobile */
 * { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .pin-btn{touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+/* Horizontales Scrollen für Bottom-Nav erlauben */
+.bnav-scroll{touch-action:pan-x !important;}
+.bnav-scroll .bni{touch-action:manipulation;}
 
 /* Scroll-Optimierung */
 .main{-webkit-overflow-scrolling:touch;}
@@ -566,14 +569,14 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 
 /* BOTTOM NAV - horizontal scrollbar */
 .bnav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);z-index:200;padding-bottom:0;}
-.bnav-scroll{display:flex;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:6px 4px 14px 4px;gap:2px;}
+.bnav-scroll{display:flex;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:6px 4px 14px 4px;gap:0;width:100%;}
 .bnav-scroll::-webkit-scrollbar{display:none;}
 @media(max-width:768px){
   .bnav{display:block;}
   body{padding-bottom:76px;}
   .main{padding:12px 12px 20px 12px;}
 }
-.bni{flex:0 0 auto;min-width:60px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;color:var(--t2);font-size:10px;padding:5px 8px;transition:color .15s;white-space:nowrap;}
+.bni{flex:0 0 auto;min-width:65px;max-width:80px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;color:var(--t2);font-size:10px;padding:5px 6px;transition:color .15s;white-space:nowrap;}
 .bni .nico{font-size:20px;width:auto;}
 .bni.active{color:var(--accent);}
 
