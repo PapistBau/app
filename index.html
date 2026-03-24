@@ -648,7 +648,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 <!-- Mitarbeiter-App (nur Zeiterfassung) -->
 <div id="ma-app" style="display:none;position:fixed;inset:0;z-index:8000;background:var(--bg);">
   <!-- Header fix -->
-  <div id="ma-header" style="position:fixed;top:0;left:0;right:0;z-index:10;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:14px 20px;box-sizing:border-box;">
+  <div id="ma-header" style="position:fixed;top:0;left:0;right:0;z-index:10;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:14px 20px;padding-top:max(14px, env(safe-area-inset-top, 14px));box-sizing:border-box;">
     <div>
       <div style="font-family:'Bebas Neue',sans-serif;font-size:24px;color:var(--accent);line-height:1" id="ma-app-name">Hallo!</div>
       <div style="font-size:11px;color:var(--t2)">Stunden erfassen</div>
@@ -656,7 +656,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <button class="btn btn-ghost btn-sm" onclick="doLogout()">🚪 Abmelden</button>
   </div>
   <!-- Scrollbarer Content — fixer Bereich zwischen Header und unten -->
-  <div id="ma-zeit-content" style="position:fixed;top:56px;left:0;right:0;bottom:0;overflow-y:scroll;-webkit-overflow-scrolling:touch;padding:16px 16px 40px 16px;box-sizing:border-box;"></div>
+  <div id="ma-zeit-content" style="position:fixed;top:56px;left:0;right:0;bottom:0;overflow-y:scroll;-webkit-overflow-scrolling:touch;padding:16px 16px 120px 16px;box-sizing:border-box;"></div>
 </div>
 
 <!-- Hauptapp (Admin) -->
@@ -4653,23 +4653,30 @@ function loginAsMitarbeiter(ma){
   sessionStorage.setItem('bm_session', JSON.stringify(currentUser));
   document.getElementById('login-screen').style.display='none';
   document.getElementById('main-app').style.display='none';
+  // Bottom-Nav explizit verstecken
+  const bnav = document.querySelector('.bnav');
+  if(bnav) bnav.style.display='none';
   const maApp = document.getElementById('ma-app');
   maApp.style.display='block';
-  // Safe area für iPhone Notch
-  const safeTop = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sat')||'0')||0;
-  const headerH = 56 + safeTop;
-  const header = document.getElementById('ma-header');
-  const content = document.getElementById('ma-zeit-content');
-  if(header) header.style.paddingTop = safeTop ? (14+safeTop)+'px' : '14px';
-  if(content) content.style.top = headerH+'px';
   document.getElementById('ma-app-name').textContent='Hallo, '+ma.vorname+'!';
   renderMaZeiterfassung(ma.id);
+  requestAnimationFrame(()=>{
+    const header = document.getElementById('ma-header');
+    const content = document.getElementById('ma-zeit-content');
+    if(header && content){
+      const h = header.getBoundingClientRect().height;
+      content.style.top = h+'px';
+    }
+  });
 }
 
 function doLogout(){
   currentUser=null;
   sessionStorage.removeItem('bm_session');
   pinBuffer='';
+  // Bottom-Nav wieder einblenden
+  const bnav = document.querySelector('.bnav');
+  if(bnav) bnav.style.display='';
   showLoginScreen();
 }
 
