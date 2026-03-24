@@ -4487,12 +4487,14 @@ function hashPin(pin){
   return String(h);
 }
 
-// Admin-Passwort in Supabase speichern (geräteübergreifend)
+// Admin-Passwort — fest hinterlegt als Fallback
+const ADMIN_HASH_DEFAULT = '1689278';
+
 async function getAdminHash(){
-  // Zuerst lokal prüfen (schneller)
+  // Zuerst lokal prüfen
   const local = localStorage.getItem('bm_admin_pw');
   if(local) return local;
-  // Dann aus Supabase laden
+  // Dann Supabase
   try {
     const res = await fetch(`${SB_URL}/rest/v1/settings?key=eq.admin_pw&select=value`, {headers:sbHeaders});
     if(res.ok){
@@ -4503,13 +4505,13 @@ async function getAdminHash(){
       }
     }
   } catch(e){}
-  return '';
+  // Fallback: eingebautes Passwort
+  return ADMIN_HASH_DEFAULT;
 }
 
 async function setAdminHash(pw){
   const hash = hashPin(pw);
   localStorage.setItem('bm_admin_pw', hash);
-  // In Supabase speichern
   try {
     await fetch(`${SB_URL}/rest/v1/settings`, {
       method:'POST',
