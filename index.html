@@ -1682,7 +1682,8 @@ function renderDashboard(){
   document.getElementById('dash-stats').innerHTML=`
     <div class="stat s-blue"><div class="stat-ico">🔵</div><div class="stat-val">${lauf.length}</div><div class="stat-lbl">Laufende Projekte</div></div>
     <div class="stat s-green"><div class="stat-ico">✅</div><div class="stat-val">${done.length}</div><div class="stat-lbl">Abgeschlossen</div></div>
-    <div class="stat s-accent"><div class="stat-ico">📄</div><div class="stat-val">${angErstellt.length+angOffen.length}</div><div class="stat-lbl">Angebote</div></div>
+    <div class="stat s-accent"><div class="stat-ico">📄</div><div class="stat-val">${angErstellt.length}</div><div class="stat-lbl">Angebote erstellt</div></div>
+    <div class="stat s-red"><div class="stat-ico">📋</div><div class="stat-val">${angOffen.length}</div><div class="stat-lbl">Angebote ausstehend</div></div>
     <div class="stat s-purple"><div class="stat-ico">📬</div><div class="stat-val">${anf.length}</div><div class="stat-lbl">Anfragen</div></div>
     <div class="stat s-green"><div class="stat-ico">🧾</div><div class="stat-val">${num(rechBez)} €</div><div class="stat-lbl">Rechnungen bezahlt</div></div>
     <div class="stat s-orange"><div class="stat-ico">⏳</div><div class="stat-val">${num(rechOff)} €</div><div class="stat-lbl">Rechnungen offen</div></div>
