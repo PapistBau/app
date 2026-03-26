@@ -1730,7 +1730,7 @@ function renderProjCard(p){
   return`<div class="pcard" onclick="openDetail(${p.id})">
     <div class="pcard-bar" style="background:${s.col}"></div>
     <div class="pcard-body">
-      <div class="pcard-name">${s.ico} ${p.name}</div>
+      <div class="pcard-name">${s.ico} ${p.name}${p.zeitGesperrt?' 🔒':''}</div>
       <div class="pcard-meta">
         ${p.kunde?`<span>👤 ${p.kunde}</span>`:''}
         ${p.ort?`<span>📍 ${p.ort}</span>`:''}
@@ -2361,6 +2361,14 @@ www.papist-bau.de`);
   openMailto(`mailto:${to}?subject=${betreff}&body=${body}`);
 }
 
+function toggleZeitGesperrt(id){
+  const p=projects.find(x=>x.id===id); if(!p) return;
+  p.zeitGesperrt = !p.zeitGesperrt;
+  saveAll();
+  openDetail(id);
+  toast(p.zeitGesperrt ? '🔒 Zeiterfassung gesperrt' : '🔓 Zeiterfassung freigegeben');
+}
+
 function delProject(id){
   const p=projects.find(x=>x.id===id);
   confirmDelete(
@@ -2531,6 +2539,9 @@ function openDetail(id){
       ${p.email&&(isAng)?`<button class="btn btn-blue btn-sm" onclick="mailtoAngebot(${id})">📧 Angebot senden</button>`:''}
       ${p.email&&p.typ==='anfrage'?`<button class="btn btn-blue btn-sm" onclick="mailtoAnfrage(${id})">📧 Antworten</button>`:''}
       ${isAng?`<button class="btn btn-green btn-sm" onclick="closeModal('modal-detail');openBaufDialog(${id})">✅ Beauftragen</button>`:''}
+      ${p.typ==='laufend'?`<button class="btn btn-sm" style="background:${p.zeitGesperrt?'var(--orange)':'var(--card2)'};border:1px solid var(--border)" onclick="toggleZeitGesperrt(${id})" title="Zeiterfassung für Mitarbeiter sperren/freigeben">
+        ${p.zeitGesperrt?'🔒 Zeiterfassung gesperrt':'🔓 Zeiterfassung aktiv'}
+      </button>`:''}
       <button class="btn btn-primary btn-sm" onclick="closeModal('modal-detail');editProject(${id})">✏ Bearbeiten</button>
     </div>`;
   document.getElementById('modal-detail').style.display='flex';
@@ -5192,7 +5203,7 @@ function renderMaZeiterfassung(maId, filterMonth){
   const myZeiten = allMyZeiten.filter(z=>z.datum.startsWith(activeMonth));
   const thisMonth=zeiten.filter(z=>String(z.maId)===String(maId)&&z.datum.startsWith(activeMonth));
   const totalH=thisMonth.reduce((a,z)=>a+z.std,0);
-  const projOptions=projects.filter(p=>p.typ==='laufend')
+  const projOptions=projects.filter(p=>p.typ==='laufend' && !p.zeitGesperrt)
     .map(p=>`<option value="${p.id}">${p.name}${p.ort?' · '+p.ort:''}</option>`).join('');
 
   // Verfügbare Monate aus eigenen Buchungen
