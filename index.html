@@ -1462,6 +1462,32 @@ const SB_KEY = 'sb_publishable_dHMEwwbyLyZtvqp2n1R8oA_dF9b-qXU';
 const sbHeaders = {'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
 let syncTimer = null;
 
+// Gelöschte IDs merken damit andere Geräte sie nicht wieder einspielen
+function trackDeleted(table, id){
+  const key = 'bm_deleted';
+  let deleted = {};
+  try{ deleted = JSON.parse(localStorage.getItem(key)||'{}'); }catch(e){}
+  if(!deleted[table]) deleted[table] = [];
+  if(!deleted[table].includes(String(id))) deleted[table].push(String(id));
+  localStorage.setItem(key, JSON.stringify(deleted));
+  // Auch in Supabase speichern
+  const allIds = Object.entries(deleted).map(([t,ids])=>ids.map(id=>({id:`${t}:${id}`,data:{table:t,id:String(id)},updated_at:new Date().toISOString()}))).flat();
+  if(allIds.length){
+    fetch(`${SB_URL}/rest/v1/deleted_ids`,{
+      method:'POST',
+      headers:{...sbHeaders,'Prefer':'resolution=merge-duplicates'},
+      body:JSON.stringify(allIds)
+    }).catch(()=>{});
+  }
+}
+
+function getDeletedIds(table){
+  try{
+    const deleted = JSON.parse(localStorage.getItem('bm_deleted')||'{}');
+    return new Set((deleted[table]||[]).map(String));
+  }catch(e){ return new Set(); }
+}
+
 function saveAll(){
   localStorage.setItem('bm_proj',JSON.stringify(projects));
   localStorage.setItem('bm_ma',JSON.stringify(workers));
@@ -2341,6 +2367,7 @@ function delProject(id){
     'Projekt löschen?',
     p?`"${p.name}" wird gelöscht. Alle Fotos und Aufgaben werden ebenfalls entfernt.`:'Dieses Projekt wird gelöscht.',
     ()=>{
+      trackDeleted('projects', id);
       projects=projects.filter(x=>x.id!==id);
       todos=todos.filter(t=>t.projId!==id);
       fotos=fotos.filter(f=>f.projId!==id);
@@ -2609,7 +2636,7 @@ function toggleTodo(id,projId){
 }
 
 function delTodo(id,projId){
-  todos=todos.filter(t=>t.id!==id);
+  trackDeleted('todos',id); todos=todos.filter(t=>t.id!==id);
   saveAll();openDetail(projId);
 }
 
@@ -2784,7 +2811,7 @@ function delRech(id){
   confirmDelete(
     'Rechnung löschen?',
     r?`Rechnung Nr. ${r.nr||id} über ${r.betrag?Number(r.betrag).toLocaleString('de-DE')+' €':''} wird gelöscht.`:'Diese Rechnung wird gelöscht.',
-    ()=>{ rechnungen=rechnungen.filter(x=>String(x.id)!==String(id)); saveAll();renderRechnungen();updateBadges(); toast('🗑 Rechnung gelöscht','var(--red)'); }
+    ()=>{ trackDeleted('rechnungen', id); rechnungen=rechnungen.filter(x=>String(x.id)!==String(id)); saveAll();renderRechnungen();updateBadges(); toast('🗑 Rechnung gelöscht','var(--red)'); }
   );
 }
 
@@ -3131,7 +3158,7 @@ function delMA(id){
   confirmDelete(
     'Mitarbeiter löschen?',
     w?`${w.vorname} ${w.nachname} wird gelöscht. Bereits gebuchte Zeiten bleiben erhalten.`:'Dieser Mitarbeiter wird gelöscht.',
-    ()=>{ workers=workers.filter(x=>x.id!==id); saveAll();renderMA(); toast('🗑 Mitarbeiter gelöscht','var(--red)'); }
+    ()=>{ trackDeleted('workers', id); workers=workers.filter(x=>x.id!==id); saveAll();renderMA(); toast('🗑 Mitarbeiter gelöscht','var(--red)'); }
   );
 }
 
@@ -3220,7 +3247,7 @@ function saveZeit(){
 
 function delZeit(id){
   confirmDelete('Zeiteintrag löschen?','Dieser Zeiteintrag wird gelöscht.',
-    ()=>{ zeiten=zeiten.filter(z=>z.id!==id); saveAll();renderZeitList(); toast('🗑 Zeiteintrag gelöscht','var(--red)'); }
+    ()=>{ trackDeleted('zeiten',id); zeiten=zeiten.filter(z=>z.id!==id); saveAll();renderZeitList(); toast('🗑 Zeiteintrag gelöscht','var(--red)'); }
   );
 }
 
@@ -4336,7 +4363,7 @@ function delKat(id){
   confirmDelete(
     'Kategorie löschen?',
     k?`"${k.name}" und alle ${anzahl} Aufgaben darin werden gelöscht.`:'Diese Kategorie wird gelöscht.',
-    ()=>{ kategorien=kategorien.filter(x=>x.id!==id); allgTodos=allgTodos.filter(t=>t.katId!==id); saveKatData();renderAllgTodos(); toast('🗑 Kategorie gelöscht','var(--red)'); }
+    ()=>{ trackDeleted('kategorien',id); kategorien=kategorien.filter(x=>x.id!==id); allgTodos=allgTodos.filter(t=>t.katId!==id); saveKatData();renderAllgTodos(); toast('🗑 Kategorie gelöscht','var(--red)'); }
   );
 }
 
@@ -4385,7 +4412,7 @@ function toggleAllgTodo(id){
 }
 
 function delAllgTodo(id){
-  allgTodos=allgTodos.filter(t=>t.id!==id);
+  trackDeleted('allgtodos',id); allgTodos=allgTodos.filter(t=>t.id!==id);
   saveKatData();renderAllgTodos();
 }
 
@@ -4552,7 +4579,7 @@ function delMaterial(id){
   const m=material.find(x=>String(x.id)===String(id));
   confirmDelete('Material löschen?',
     m?`"${m.lieferant}" – ${num(m.netto)} € Netto wird gelöscht.`:'Dieser Eintrag wird gelöscht.',
-    ()=>{ material=material.filter(x=>String(x.id)!==String(id)); saveAll();renderMaterial(); toast('🗑 Gelöscht','var(--red)'); }
+    ()=>{ trackDeleted('material', id); material=material.filter(x=>String(x.id)!==String(id)); saveAll();renderMaterial(); toast('🗑 Gelöscht','var(--red)'); }
   );
 }
 
@@ -5253,7 +5280,7 @@ function deleteMaZeit(zid, maId){
   const z=zeiten.find(x=>String(x.id)===String(zid));
   const month=z?z.datum.slice(0,7):today().slice(0,7);
   confirmDelete('Eintrag löschen?','Dieser Zeiteintrag wird gelöscht.',
-    ()=>{zeiten=zeiten.filter(x=>String(x.id)!==String(zid));saveAll();renderMaZeiterfassung(maId,month);}
+    ()=>{trackDeleted('zeiten', zid);zeiten=zeiten.filter(x=>String(x.id)!==String(zid));saveAll();renderMaZeiterfassung(maId,month);}
   );
 }
 
@@ -5351,17 +5378,34 @@ async function sbLoadAll(){
 async function initFromCloud(){
   setSyncStatus('saving');
   try{
-    // Supabase ist IMMER die einzige Quelle der Wahrheit
+    // Gelöschte IDs aus Supabase laden
+    try{
+      const delRes = await fetch(`${SB_URL}/rest/v1/deleted_ids?select=data`,{headers:sbHeaders});
+      if(delRes.ok){
+        const delRows = await delRes.json();
+        const deleted = {};
+        delRows.forEach(r=>{ if(r.data){ const {table,id}=r.data; if(!deleted[table]) deleted[table]=[]; deleted[table].push(String(id)); }});
+        localStorage.setItem('bm_deleted', JSON.stringify(deleted));
+      }
+    }catch(e){}
+
+    // Daten laden
     const cloudData = await sbLoadAll();
-    projects    = cloudData.projects    || [];
-    workers     = cloudData.workers     || [];
-    zeiten      = cloudData.zeiten      || [];
-    rechnungen  = cloudData.rechnungen  || [];
-    todos       = cloudData.todos       || [];
+
+    // Gelöschte IDs herausfiltern
+    const del = JSON.parse(localStorage.getItem('bm_deleted')||'{}');
+    const isDeleted = (table, id) => (del[table]||[]).includes(String(id));
+
+    projects    = (cloudData.projects   ||[]).filter(x=>!isDeleted('projects',   x.id));
+    workers     = (cloudData.workers    ||[]).filter(x=>!isDeleted('workers',    x.id));
+    zeiten      = (cloudData.zeiten     ||[]).filter(x=>!isDeleted('zeiten',     x.id));
+    rechnungen  = (cloudData.rechnungen ||[]).filter(x=>!isDeleted('rechnungen', x.id));
+    todos       = (cloudData.todos      ||[]).filter(x=>!isDeleted('todos',      x.id));
     kategorien  = cloudData.kategorien  || [];
-    allgTodos   = cloudData.allgtodos   || [];
-    material    = cloudData.material    || [];
+    allgTodos   = (cloudData.allgtodos  ||[]).filter(x=>!isDeleted('allgtodos',  x.id));
+    material    = (cloudData.material   ||[]).filter(x=>!isDeleted('material',   x.id));
     if(cloudData.fotos && cloudData.fotos.length) fotos = cloudData.fotos;
+
     // Lokal cachen
     localStorage.setItem('bm_proj',      JSON.stringify(projects));
     localStorage.setItem('bm_ma',        JSON.stringify(workers));
