@@ -853,6 +853,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   <div class="ph">
     <div><div class="ph-title">Mitarbeiter</div><div class="ph-sub">Team verwalten</div></div>
     <button class="btn btn-primary" onclick="openMAModal()">＋ Mitarbeiter anlegen</button>
+    <button class="btn btn-blue" onclick="openUmbuchenModal()">🔄 Stunden umbuchen</button>
   </div>
   <div class="ma-grid" id="ma-grid"></div>
   <div class="empty" id="empty-ma" style="display:none"><div class="empty-ico">👷</div><div class="empty-ttl">Noch keine Mitarbeiter</div></div>
@@ -1154,6 +1155,29 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   <div class="mfooter">
     <button class="btn btn-ghost" onclick="closeModal('modal-ma')">Abbrechen</button>
     <button class="btn btn-primary" onclick="saveMA()">💾 Speichern</button>
+  </div>
+</div>
+</div>
+
+<!-- STUNDEN UMBUCHEN MODAL -->
+<div class="overlay" id="modal-umbuchen" style="display:none" onclick="if(event.target===this)closeModal('modal-umbuchen')">
+<div class="modal">
+  <div class="mttl">🔄 Stunden umbuchen</div>
+  <div style="font-size:13px;color:var(--t2);margin-bottom:16px">Alle Stunden eines Mitarbeiters auf einen anderen umbuchen — z.B. bei Duplikaten.</div>
+  <div class="fg">
+    <label class="fl">Von Mitarbeiter (falsch gebucht) *</label>
+    <select class="fs" id="umb-von"></select>
+  </div>
+  <div class="fg">
+    <label class="fl">Zu Mitarbeiter (korrekt) *</label>
+    <select class="fs" id="umb-zu"></select>
+  </div>
+  <div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;color:var(--t2)" id="umb-info">
+    Wähle beide Mitarbeiter um die Stunden zu sehen.
+  </div>
+  <div class="mfooter">
+    <button class="btn btn-ghost" onclick="closeModal('modal-umbuchen')">Abbrechen</button>
+    <button class="btn btn-primary" onclick="doUmbuchen()">🔄 Jetzt umbuchen</button>
   </div>
 </div>
 </div>
@@ -1487,42 +1511,38 @@ const sbHeaders = {'Content-Type':'application/json','apikey':SB_KEY,'Authorizat
 let syncTimer = null;
 
 // Gelöschte IDs merken damit andere Geräte sie nicht wieder einspielen
-function trackDeleted(table, id){
-  const key = 'bm_deleted';
-  let deleted = {};
-  try{ deleted = JSON.parse(localStorage.getItem(key)||'{}'); }catch(e){}
-  if(!deleted[table]) deleted[table] = [];
-  if(!deleted[table].includes(String(id))) deleted[table].push(String(id));
-  localStorage.setItem(key, JSON.stringify(deleted));
-  // Auch in Supabase speichern
-  const allIds = Object.entries(deleted).map(([t,ids])=>ids.map(id=>({id:`${t}:${id}`,data:{table:t,id:String(id)},updated_at:new Date().toISOString()}))).flat();
-  if(allIds.length){
-    fetch(`${SB_URL}/rest/v1/deleted_ids`,{
+// Sofortiges Löschen aus Supabase + in deleted_ids merken
+async function trackDeleted(table, id){
+  const sid = String(id);
+  // 1. Sofort aus Supabase löschen
+  try{
+    await fetch(`${SB_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(sid)}`,{
+      method:'DELETE', headers:sbHeaders
+    });
+  }catch(e){ console.warn('Delete failed:', e); }
+  // 2. In deleted_ids merken damit andere Geräte ihn nicht wieder hochladen
+  try{
+    await fetch(`${SB_URL}/rest/v1/deleted_ids`,{
       method:'POST',
       headers:{...sbHeaders,'Prefer':'resolution=merge-duplicates'},
-      body:JSON.stringify(allIds)
-    }).catch(()=>{});
-  }
-}
-
-function getDeletedIds(table){
-  try{
-    const deleted = JSON.parse(localStorage.getItem('bm_deleted')||'{}');
-    return new Set((deleted[table]||[]).map(String));
-  }catch(e){ return new Set(); }
+      body:JSON.stringify([{id:`${table}:${sid}`,data:{table,id:sid},updated_at:new Date().toISOString()}])
+    });
+  }catch(e){}
 }
 
 function saveAll(){
-  localStorage.setItem('bm_proj',JSON.stringify(projects));
-  localStorage.setItem('bm_ma',JSON.stringify(workers));
-  localStorage.setItem('bm_zeit',JSON.stringify(zeiten));
-  localStorage.setItem('bm_rech',JSON.stringify(rechnungen));
-  localStorage.setItem('bm_todos',JSON.stringify(todos));
-  localStorage.setItem('bm_fotos',JSON.stringify(fotos));
-  localStorage.setItem('bm_kat',JSON.stringify(kategorien));
-  localStorage.setItem('bm_allgtodos',JSON.stringify(allgTodos));
-  localStorage.setItem('bm_material',JSON.stringify(material));
-  localStorage.setItem('bm_last_save', Date.now().toString());
+  // Timestamp auf alle geänderten Daten setzen
+  const now = Date.now();
+  localStorage.setItem('bm_proj',      JSON.stringify(projects));
+  localStorage.setItem('bm_ma',        JSON.stringify(workers));
+  localStorage.setItem('bm_zeit',      JSON.stringify(zeiten));
+  localStorage.setItem('bm_rech',      JSON.stringify(rechnungen));
+  localStorage.setItem('bm_todos',     JSON.stringify(todos));
+  localStorage.setItem('bm_fotos',     JSON.stringify(fotos));
+  localStorage.setItem('bm_kat',       JSON.stringify(kategorien));
+  localStorage.setItem('bm_allgtodos', JSON.stringify(allgTodos));
+  localStorage.setItem('bm_material',  JSON.stringify(material));
+  localStorage.setItem('bm_last_save', String(now));
   clearTimeout(syncTimer);
   syncTimer = setTimeout(syncToCloud, 1500);
 }
@@ -2346,8 +2366,8 @@ function delProject(id){
   confirmDelete(
     'Projekt löschen?',
     p?`"${p.name}" wird gelöscht. Alle Fotos und Aufgaben werden ebenfalls entfernt.`:'Dieses Projekt wird gelöscht.',
-    ()=>{
-      trackDeleted('projects', id);
+    async ()=>{
+      await trackDeleted('projects', id);
       projects=projects.filter(x=>x.id!==id);
       todos=todos.filter(t=>t.projId!==id);
       fotos=fotos.filter(f=>f.projId!==id);
@@ -2672,7 +2692,7 @@ function toggleTodoProjPage(id){
 
 function delTodoProjPage(id){
   confirmDelete('Aufgabe löschen?','Diese Aufgabe wird gelöscht.',
-    ()=>{ trackDeleted('todos',id); todos=todos.filter(x=>String(x.id)!==String(id)); saveAll(); renderProjTodos(); }
+    async ()=>{ await trackDeleted('todos',id); todos=todos.filter(x=>String(x.id)!==String(id)); saveAll(); renderProjTodos(); }
   );
 }
 
@@ -2731,8 +2751,8 @@ function toggleTodo(id,projId){
   saveAll();openDetail(projId);
 }
 
-function delTodo(id,projId){
-  trackDeleted('todos',id); todos=todos.filter(t=>t.id!==id);
+async function delTodo(id,projId){
+  await trackDeleted('todos',id); todos=todos.filter(t=>t.id!==id);
   saveAll();openDetail(projId);
 }
 
@@ -2907,7 +2927,7 @@ function delRech(id){
   confirmDelete(
     'Rechnung löschen?',
     r?`Rechnung Nr. ${r.nr||id} über ${r.betrag?Number(r.betrag).toLocaleString('de-DE')+' €':''} wird gelöscht.`:'Diese Rechnung wird gelöscht.',
-    ()=>{ trackDeleted('rechnungen', id); rechnungen=rechnungen.filter(x=>String(x.id)!==String(id)); saveAll();renderRechnungen();updateBadges(); toast('🗑 Rechnung gelöscht','var(--red)'); }
+    async ()=>{ await trackDeleted('rechnungen', id); rechnungen=rechnungen.filter(x=>String(x.id)!==String(id)); saveAll();renderRechnungen();updateBadges(); toast('🗑 Rechnung gelöscht','var(--red)'); }
   );
 }
 
@@ -3243,10 +3263,58 @@ function saveMA(){
   const errEl = document.getElementById('ma-pin-error');
   if(errEl) errEl.textContent='';
 
-  const w={id:editMAId||Date.now(),vorname:vn,nachname:nn,rolle:document.getElementById('ma-rolle').value.trim(),lohn:parseFloat(document.getElementById('ma-lohn').value)||0,tel:document.getElementById('ma-tel').value.trim(),pin:pin&&/^\d{4}$/.test(pin)?pin:''};
-  if(editMAId){const i=workers.findIndex(x=>String(x.id)===String(editMAId));if(i>-1)workers[i]=w;}
-  else workers.push(w);
+  const newLohn = parseFloat(document.getElementById('ma-lohn').value)||0;
+  const w={id:editMAId||Date.now(),vorname:vn,nachname:nn,rolle:document.getElementById('ma-rolle').value.trim(),lohn:newLohn,tel:document.getElementById('ma-tel').value.trim(),pin:pin&&/^\d{4}$/.test(pin)?pin:''};
+  if(editMAId){
+    const i=workers.findIndex(x=>String(x.id)===String(editMAId));
+    if(i>-1) workers[i]=w;
+  } else {
+    workers.push(w);
+  }
   closeModal('modal-ma');saveAll();renderMA();
+  toast(`✅ ${w.vorname} ${w.nachname} gespeichert — Stundensatz: ${newLohn} €/h`);
+}
+
+function openUmbuchenModal(){
+  const sel = (id) => {
+    const el = document.getElementById(id);
+    el.innerHTML = '<option value="">— Mitarbeiter wählen —</option>' +
+      workers.map(w=>`<option value="${w.id}">${w.vorname} ${w.nachname} (${w.lohn||0} €/h)</option>`).join('');
+    el.onchange = updateUmbuchenInfo;
+  };
+  sel('umb-von'); sel('umb-zu');
+  document.getElementById('umb-info').textContent = 'Wähle beide Mitarbeiter um die Stunden zu sehen.';
+  document.getElementById('modal-umbuchen').style.display='flex';
+}
+
+function updateUmbuchenInfo(){
+  const vonId = document.getElementById('umb-von').value;
+  const zuId  = document.getElementById('umb-zu').value;
+  const info  = document.getElementById('umb-info');
+  if(!vonId){ info.textContent='Wähle beide Mitarbeiter.'; return; }
+  const wVon = workers.find(w=>String(w.id)===String(vonId));
+  const wZu  = workers.find(w=>String(w.id)===String(zuId));
+  const stunden = zeiten.filter(z=>String(z.maId)===String(vonId));
+  const totalH  = stunden.reduce((a,z)=>a+z.std,0);
+  info.innerHTML = `
+    <div><strong>Von:</strong> ${wVon?wVon.vorname+' '+wVon.nachname:'?'} — ${stunden.length} Einträge, ${totalH} Stunden</div>
+    ${zuId&&wZu?`<div style="margin-top:6px"><strong>Zu:</strong> ${wZu.vorname} ${wZu.nachname} (${wZu.lohn||0} €/h)</div>`:''}
+    ${stunden.length?`<div style="margin-top:8px;color:var(--orange)">⚠ Alle ${stunden.length} Einträge werden umgebucht.</div>`:'<div style="color:var(--green)">Keine Stunden gefunden.</div>'}
+  `;
+}
+
+function doUmbuchen(){
+  const vonId = document.getElementById('umb-von').value;
+  const zuId  = document.getElementById('umb-zu').value;
+  if(!vonId||!zuId){ alert('Bitte beide Mitarbeiter wählen.'); return; }
+  if(vonId===zuId){ alert('Von und Zu müssen unterschiedlich sein.'); return; }
+  const count = zeiten.filter(z=>String(z.maId)===String(vonId)).length;
+  if(!count){ toast('Keine Stunden zu umbuchen.','var(--orange)'); closeModal('modal-umbuchen'); return; }
+  zeiten = zeiten.map(z => String(z.maId)===String(vonId) ? {...z, maId:parseInt(zuId)||zuId} : z);
+  saveAll();
+  closeModal('modal-umbuchen');
+  toast(`✅ ${count} Einträge erfolgreich umgebucht!`);
+  renderMA();
 }
 
 function delMA(id){
@@ -3254,7 +3322,7 @@ function delMA(id){
   confirmDelete(
     'Mitarbeiter löschen?',
     w?`${w.vorname} ${w.nachname} wird gelöscht. Bereits gebuchte Zeiten bleiben erhalten.`:'Dieser Mitarbeiter wird gelöscht.',
-    ()=>{ trackDeleted('workers', id); workers=workers.filter(x=>x.id!==id); saveAll();renderMA(); toast('🗑 Mitarbeiter gelöscht','var(--red)'); }
+    async ()=>{ await trackDeleted('workers', id); workers=workers.filter(x=>x.id!==id); saveAll();renderMA(); toast('🗑 Mitarbeiter gelöscht','var(--red)'); }
   );
 }
 
@@ -3343,7 +3411,7 @@ function saveZeit(){
 
 function delZeit(id){
   confirmDelete('Zeiteintrag löschen?','Dieser Zeiteintrag wird gelöscht.',
-    ()=>{ trackDeleted('zeiten',id); zeiten=zeiten.filter(z=>z.id!==id); saveAll();renderZeitList(); toast('🗑 Zeiteintrag gelöscht','var(--red)'); }
+    async ()=>{ await trackDeleted('zeiten',id); zeiten=zeiten.filter(z=>z.id!==id); saveAll();renderZeitList(); toast('🗑 Zeiteintrag gelöscht','var(--red)'); }
   );
 }
 
@@ -4459,7 +4527,7 @@ function delKat(id){
   confirmDelete(
     'Kategorie löschen?',
     k?`"${k.name}" und alle ${anzahl} Aufgaben darin werden gelöscht.`:'Diese Kategorie wird gelöscht.',
-    ()=>{ trackDeleted('kategorien',id); kategorien=kategorien.filter(x=>x.id!==id); allgTodos=allgTodos.filter(t=>t.katId!==id); saveKatData();renderAllgTodos(); toast('🗑 Kategorie gelöscht','var(--red)'); }
+    async ()=>{ await trackDeleted('kategorien',id); kategorien=kategorien.filter(x=>x.id!==id); allgTodos=allgTodos.filter(t=>t.katId!==id); saveKatData();renderAllgTodos(); toast('🗑 Kategorie gelöscht','var(--red)'); }
   );
 }
 
@@ -4507,8 +4575,9 @@ function toggleAllgTodo(id){
   saveKatData();renderAllgTodos();
 }
 
-function delAllgTodo(id){
-  trackDeleted('allgtodos',id); allgTodos=allgTodos.filter(t=>t.id!==id);
+async function delAllgTodo(id){
+  await trackDeleted('allgtodos', id);
+  allgTodos = allgTodos.filter(t=>String(t.id)!==String(id));
   saveKatData();renderAllgTodos();
 }
 
@@ -4675,7 +4744,7 @@ function delMaterial(id){
   const m=material.find(x=>String(x.id)===String(id));
   confirmDelete('Material löschen?',
     m?`"${m.lieferant}" – ${num(m.netto)} € Netto wird gelöscht.`:'Dieser Eintrag wird gelöscht.',
-    ()=>{ trackDeleted('material', id); material=material.filter(x=>String(x.id)!==String(id)); saveAll();renderMaterial(); toast('🗑 Gelöscht','var(--red)'); }
+    async ()=>{ await trackDeleted('material', id); material=material.filter(x=>String(x.id)!==String(id)); saveAll();renderMaterial(); toast('🗑 Gelöscht','var(--red)'); }
   );
 }
 
@@ -5388,7 +5457,7 @@ function deleteMaZeit(zid, maId){
   const z=zeiten.find(x=>String(x.id)===String(zid));
   const month=z?z.datum.slice(0,7):today().slice(0,7);
   confirmDelete('Eintrag löschen?','Dieser Zeiteintrag wird gelöscht.',
-    ()=>{trackDeleted('zeiten', zid);zeiten=zeiten.filter(x=>String(x.id)!==String(zid));saveAll();renderMaZeiterfassung(maId,month);}
+    async ()=>{await trackDeleted('zeiten', zid);zeiten=zeiten.filter(x=>String(x.id)!==String(zid));saveAll();renderMaZeiterfassung(maId,month);}
   );
 }
 
@@ -5450,20 +5519,24 @@ async function sbDeleteMissing(table, localIds){
 async function syncToCloud(){
   setSyncStatus('saving');
   try{
-    await sbUpsert('projects',  projects);
-    await sbUpsert('workers',   workers);
-    await sbUpsert('zeiten',    zeiten);
-    await sbUpsert('rechnungen',rechnungen);
-    await sbUpsert('todos',     todos);
-    await sbUpsert('kategorien',kategorien);
-    await sbUpsert('allgtodos', allgTodos);
-    if(material.length) await sbUpsert('material', material);
-    if(fotos.length) await sbUpsert('fotos',fotos);
-    await sbDeleteMissing('projects',  projects.map(x=>x.id));
-    await sbDeleteMissing('rechnungen',rechnungen.map(x=>x.id));
-    await sbDeleteMissing('workers',   workers.map(x=>x.id));
-    await sbDeleteMissing('zeiten',    zeiten.map(x=>x.id));
-    await sbDeleteMissing('material',  material.map(x=>x.id));
+    // Vor dem Sync: gelöschte IDs aus Supabase holen damit wir sie nicht wieder hochladen
+    const deletedCheck = await fetch(`${SB_URL}/rest/v1/deleted_ids?select=id`,{headers:sbHeaders}).catch(()=>null);
+    const deletedIds = new Set();
+    if(deletedCheck && deletedCheck.ok){
+      const rows = await deletedCheck.json();
+      rows.forEach(r=>deletedIds.add(r.id));
+    }
+    const notDeleted = (table, items) => items.filter(x=>!deletedIds.has(`${table}:${String(x.id)}`));
+
+    if(projects.length)   await sbUpsert('projects',   notDeleted('projects',   projects));
+    if(workers.length)    await sbUpsert('workers',    notDeleted('workers',    workers));
+    if(zeiten.length)     await sbUpsert('zeiten',     notDeleted('zeiten',     zeiten));
+    if(rechnungen.length) await sbUpsert('rechnungen', notDeleted('rechnungen', rechnungen));
+    if(todos.length)      await sbUpsert('todos',      notDeleted('todos',      todos));
+    if(kategorien.length) await sbUpsert('kategorien', notDeleted('kategorien', kategorien));
+    if(allgTodos.length)  await sbUpsert('allgtodos',  notDeleted('allgtodos',  allgTodos));
+    if(material.length)   await sbUpsert('material',   notDeleted('material',   material));
+    if(fotos.length)      await sbUpsert('fotos',      notDeleted('fotos',      fotos));
     setSyncStatus('ok');
   }catch(e){
     console.warn('Sync error:',e);
@@ -5486,35 +5559,27 @@ async function sbLoadAll(){
 async function initFromCloud(){
   setSyncStatus('saving');
   try{
-    // Gelöschte IDs aus Supabase laden
+    // Gelöschte IDs laden
+    const deletedIds = new Set();
     try{
-      const delRes = await fetch(`${SB_URL}/rest/v1/deleted_ids?select=data`,{headers:sbHeaders});
-      if(delRes.ok){
-        const delRows = await delRes.json();
-        const deleted = {};
-        delRows.forEach(r=>{ if(r.data){ const {table,id}=r.data; if(!deleted[table]) deleted[table]=[]; deleted[table].push(String(id)); }});
-        localStorage.setItem('bm_deleted', JSON.stringify(deleted));
-      }
+      const delRes = await fetch(`${SB_URL}/rest/v1/deleted_ids?select=id`,{headers:sbHeaders});
+      if(delRes.ok){ const rows = await delRes.json(); rows.forEach(r=>deletedIds.add(r.id)); }
     }catch(e){}
 
-    // Daten laden
+    const notDel = (table, items) => (items||[]).filter(x=>!deletedIds.has(`${table}:${String(x.id)}`));
+
+    // Daten laden und gefiltert setzen
     const cloudData = await sbLoadAll();
-
-    // Gelöschte IDs herausfiltern
-    const del = JSON.parse(localStorage.getItem('bm_deleted')||'{}');
-    const isDeleted = (table, id) => (del[table]||[]).includes(String(id));
-
-    projects    = (cloudData.projects   ||[]).filter(x=>!isDeleted('projects',   x.id));
-    workers     = (cloudData.workers    ||[]).filter(x=>!isDeleted('workers',    x.id));
-    zeiten      = (cloudData.zeiten     ||[]).filter(x=>!isDeleted('zeiten',     x.id));
-    rechnungen  = (cloudData.rechnungen ||[]).filter(x=>!isDeleted('rechnungen', x.id));
-    todos       = (cloudData.todos      ||[]).filter(x=>!isDeleted('todos',      x.id));
-    kategorien  = cloudData.kategorien  || [];
-    allgTodos   = (cloudData.allgtodos  ||[]).filter(x=>!isDeleted('allgtodos',  x.id));
-    material    = (cloudData.material   ||[]).filter(x=>!isDeleted('material',   x.id));
+    projects    = notDel('projects',   cloudData.projects);
+    workers     = notDel('workers',    cloudData.workers);
+    zeiten      = notDel('zeiten',     cloudData.zeiten);
+    rechnungen  = notDel('rechnungen', cloudData.rechnungen);
+    todos       = notDel('todos',      cloudData.todos);
+    kategorien  = cloudData.kategorien || [];
+    allgTodos   = notDel('allgtodos',  cloudData.allgtodos);
+    material    = notDel('material',   cloudData.material);
     if(cloudData.fotos && cloudData.fotos.length) fotos = cloudData.fotos;
 
-    // Lokal cachen
     localStorage.setItem('bm_proj',      JSON.stringify(projects));
     localStorage.setItem('bm_ma',        JSON.stringify(workers));
     localStorage.setItem('bm_zeit',      JSON.stringify(zeiten));
