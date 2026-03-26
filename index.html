@@ -2544,7 +2544,7 @@ function openDetail(id){
       ${p.email&&(isAng)?`<button class="btn btn-blue btn-sm" onclick="mailtoAngebot(${id})">📧 Angebot senden</button>`:''}
       ${p.email&&p.typ==='anfrage'?`<button class="btn btn-blue btn-sm" onclick="mailtoAnfrage(${id})">📧 Antworten</button>`:''}
       ${isAng?`<button class="btn btn-green btn-sm" onclick="closeModal('modal-detail');openBaufDialog(${id})">✅ Beauftragen</button>`:''}
-      ${p.typ==='laufend'?`<button class="btn btn-sm" style="background:${p.zeitGesperrt?'var(--orange)':'var(--card2)'};border:1px solid var(--border)" onclick="toggleZeitGesperrt(${id})" title="Zeiterfassung für Mitarbeiter sperren/freigeben">
+      ${(p.typ==='laufend'||p.typ==='abgeschlossen')?`<button class="btn btn-sm" style="background:${p.zeitGesperrt?'var(--orange)':'var(--card2)'};border:1px solid var(--border)" onclick="toggleZeitGesperrt(${id})" title="Zeiterfassung für Mitarbeiter sperren/freigeben">
         ${p.zeitGesperrt?'🔒 Zeiterfassung gesperrt':'🔓 Zeiterfassung aktiv'}
       </button>`:''}
       <button class="btn btn-primary btn-sm" onclick="closeModal('modal-detail');editProject(${id})">✏ Bearbeiten</button>
@@ -5208,7 +5208,7 @@ function renderMaZeiterfassung(maId, filterMonth){
   const myZeiten = allMyZeiten.filter(z=>z.datum.startsWith(activeMonth));
   const thisMonth=zeiten.filter(z=>String(z.maId)===String(maId)&&z.datum.startsWith(activeMonth));
   const totalH=thisMonth.reduce((a,z)=>a+z.std,0);
-  const projOptions=projects.filter(p=>p.typ==='laufend' && !p.zeitGesperrt)
+  const projOptions=projects.filter(p=>(p.typ==='laufend'||p.typ==='abgeschlossen') && !p.zeitGesperrt)
     .map(p=>`<option value="${p.id}">${p.name}${p.ort?' · '+p.ort:''}</option>`).join('');
 
   // Verfügbare Monate aus eigenen Buchungen
