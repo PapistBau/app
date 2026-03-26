@@ -1145,11 +1145,11 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   </div>
   <div class="fg"><label class="fl">Baustelle *</label><select class="fs" id="z-bs"></select></div>
   <div class="frow">
-    <div class="fg"><label class="fl">Von *</label><input type="time" class="fi" id="z-von" oninput="calcZeitStunden()"></div>
-    <div class="fg"><label class="fl">Bis *</label><input type="time" class="fi" id="z-bis" oninput="calcZeitStunden()"></div>
+    <div class="fg"><label class="fl">Von *</label><input type="time" class="fi" id="z-von" step="1800" oninput="roundTime(this);calcZeitStunden()"></div>
+    <div class="fg"><label class="fl">Bis *</label><input type="time" class="fi" id="z-bis" step="1800" oninput="roundTime(this);calcZeitStunden()"></div>
   </div>
   <div class="frow">
-    <div class="fg"><label class="fl">Pause (Minuten)</label><input type="number" class="fi" id="z-pause" placeholder="30" min="0" max="480" step="5" value="0" oninput="calcZeitStunden()"></div>
+    <div class="fg"><label class="fl">Pause (Minuten)</label><input type="number" class="fi" id="z-pause" placeholder="30" min="0" max="480" step="15" value="0" oninput="calcZeitStunden()"></div>
     <div class="fg"><label class="fl">Stunden (berechnet)</label>
       <div id="z-std-display" style="background:var(--card2);border:1px solid var(--border);border-radius:var(--r2);padding:10px 14px;font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--accent);text-align:center">–</div>
       <input type="hidden" id="z-std">
@@ -3015,7 +3015,10 @@ function delMA(id){
 function calcZeitStunden(){
   const von = document.getElementById('z-von')?.value;
   const bis = document.getElementById('z-bis')?.value;
-  const pause = parseInt(document.getElementById('z-pause')?.value)||0;
+  let pause = parseInt(document.getElementById('z-pause')?.value)||0;
+  // Pause auf 15-Min runden
+  pause = Math.round(pause/15)*15;
+  document.getElementById('z-pause').value = pause;
   if(!von||!bis) return;
   const [vh,vm] = von.split(':').map(Number);
   const [bh,bm] = bis.split(':').map(Number);
@@ -4890,17 +4893,17 @@ function renderMaZeiterfassung(maId, filterMonth){
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div>
             <label class="fl">Von *</label>
-            <input type="time" class="fi" id="ma-z-von" style="font-size:18px;font-weight:700" oninput="calcMaStunden()">
+            <input type="time" class="fi" id="ma-z-von" step="1800" style="font-size:18px;font-weight:700" oninput="roundTime(this);calcMaStunden()">
           </div>
           <div>
             <label class="fl">Bis *</label>
-            <input type="time" class="fi" id="ma-z-bis" style="font-size:18px;font-weight:700" oninput="calcMaStunden()">
+            <input type="time" class="fi" id="ma-z-bis" step="1800" style="font-size:18px;font-weight:700" oninput="roundTime(this);calcMaStunden()">
           </div>
         </div>
 
         <div>
           <label class="fl">Pause (Minuten)</label>
-          <input type="number" class="fi" id="ma-z-pause" placeholder="z.B. 30" min="0" max="480" step="5" style="font-size:16px" oninput="calcMaStunden()" value="0">
+          <input type="number" class="fi" id="ma-z-pause" placeholder="z.B. 30" min="0" max="480" step="15" style="font-size:16px" oninput="calcMaStunden()" value="0">
         </div>
 
         <!-- Berechnung -->
@@ -4964,7 +4967,9 @@ function renderMaZeiterfassung(maId, filterMonth){
 function calcMaStunden(){
   const von = document.getElementById('ma-z-von')?.value;
   const bis = document.getElementById('ma-z-bis')?.value;
-  const pause = parseInt(document.getElementById('ma-z-pause')?.value)||0;
+  let pause = parseInt(document.getElementById('ma-z-pause')?.value)||0;
+  pause = Math.round(pause/15)*15;
+  const pauseEl = document.getElementById('ma-z-pause'); if(pauseEl) pauseEl.value=pause;
   const calcDiv = document.getElementById('ma-z-calc');
   const result = document.getElementById('ma-z-result');
   const detail = document.getElementById('ma-z-detail');
