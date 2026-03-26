@@ -694,6 +694,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   <div class="ni" data-page="az-auswertung"><span class="nico">📊</span>Auswertung</div>
   <div class="ni" data-page="az-mitarbeiter"><span class="nico">👷</span>Mitarbeiter</div>
   <hr class="ndiv">
+  <div class="ni" data-page="proj-todos"><span class="nico">📋</span>Projektaufgaben</div>
   <div class="ni" data-page="allg-todos"><span class="nico">✅</span>To-Do Liste<span class="nbadge" id="nb-allgtodo" style="display:none"></span></div>
   <div class="ni" data-page="material"><span class="nico">🧱</span>Material</div>
   <div class="ni" data-page="controlling"><span class="nico">📊</span>Controlling</div>
@@ -858,6 +859,27 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 </div>
 
 <!-- ██ ALLGEMEINE TO-DO LISTE ██ -->
+<!-- PROJEKT AUFGABEN ÜBERSICHT -->
+<div class="page" id="page-proj-todos">
+  <div class="ph">
+    <div><div class="ph-title">Aufgaben</div><div class="ph-sub">Alle Projektaufgaben im Überblick</div></div>
+    <div class="ph-r">
+      <button class="btn btn-primary" onclick="openTodoModal(null)">＋ Neue Aufgabe</button>
+    </div>
+  </div>
+  <div class="fbar" style="margin-bottom:16px">
+    <select class="fs finput" id="todo-proj-filter" onchange="renderProjTodos()" style="max-width:260px">
+      <option value="">Alle Projekte</option>
+    </select>
+    <div class="fpill active" onclick="setTodoFilter('alle',this)">Alle</div>
+    <div class="fpill" onclick="setTodoFilter('offen',this)">Offen</div>
+    <div class="fpill" onclick="setTodoFilter('erledigt',this)">Erledigt</div>
+    <div class="fpill" onclick="setTodoFilter('hoch',this)">🔴 Hoch</div>
+    <div class="fpill" onclick="setTodoFilter('faellig',this)">⚠ Überfällig</div>
+  </div>
+  <div id="proj-todos-list"></div>
+</div>
+
 <div class="page" id="page-allg-todos">
   <div class="ph">
     <div><div class="ph-title">To-Do Liste</div><div class="ph-sub">Aufgaben nach Kategorien</div></div>
@@ -1038,6 +1060,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div class="bni" data-page="az-woche"><span class="nico">📅</span>Woche</div>
     <div class="bni" data-page="az-auswertung"><span class="nico">📊</span>Auswertung</div>
     <div class="bni" data-page="az-mitarbeiter"><span class="nico">👷</span>Mitarbeiter</div>
+    <div class="bni" data-page="proj-todos"><span class="nico">📋</span>Aufgaben</div>
     <div class="bni" data-page="allg-todos"><span class="nico">✅</span>To-Dos</div>
     <div class="bni" data-page="material"><span class="nico">🧱</span>Material</div>
     <div class="bni" data-page="controlling"><span class="nico">📊</span>Controlling</div>
@@ -1339,6 +1362,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 <div class="modal">
   <div class="mttl" id="todo-mttl">Aufgabe hinzufügen</div>
   <div class="fg"><label class="fl">Aufgabe *</label><input class="fi" id="td-text" placeholder="z.B. Material bestellen"></div>
+  <div class="fg"><label class="fl">Notiz / Details</label><textarea class="fi" id="td-notiz" placeholder="z.B. 50kg Zement, Lieferant Baustoff Union anrufen…" rows="3" style="resize:vertical;font-family:inherit;line-height:1.5"></textarea></div>
   <div class="frow">
     <div class="fg"><label class="fl">Priorität</label>
       <select class="fs" id="td-prio">
@@ -1600,6 +1624,7 @@ function goPage(id,el){
   if(id==='controlling'){ initCtrlYear(); renderControlling(); }
   if(id==='material'){ renderMaterial(); }
   if(id==='allg-todos') renderAllgTodos();
+  if(id==='proj-todos') renderProjTodos();
   if(id==='rechnungen') renderRechnungen();
   if(id==='rech-projekt') renderRechProjekt();
   if(id==='az-erfassen') renderZeitList();
@@ -2393,12 +2418,16 @@ function openDetail(id){
 
   // TODOS HTML
   const todoRows=pTodos.length?pTodos.map(t=>`
-    <div class="todo-item">
-      <div class="todo-check ${t.done?'done':''}" onclick="toggleTodo(${t.id},${id})">${t.done?'✓':''}</div>
-      <span class="todo-text ${t.done?'done':''}">${t.text}</span>
-      <span class="todo-prio prio-${t.prio}">${t.prio}</span>
-      ${t.due?`<span class="todo-due ${!t.done&&t.due<today()?'overdue':''}">${fmt(t.due)}</span>`:''}
-      <button class="todo-del" onclick="delTodo(${t.id},${id})">✕</button>
+    <div class="todo-item" style="flex-direction:column;align-items:flex-start;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px;width:100%">
+        <div class="todo-check ${t.done?'done':''}" onclick="toggleTodo(${t.id},${id})">${t.done?'✓':''}</div>
+        <span class="todo-text ${t.done?'done':''}" style="flex:1">${t.text}</span>
+        <span class="todo-prio prio-${t.prio}">${t.prio}</span>
+        ${t.due?`<span class="todo-due ${!t.done&&t.due<today()?'overdue':''}">${fmt(t.due)}</span>`:''}
+        <button class="edit-btn" onclick="openTodoModal(${id},'${t.id}')" title="Bearbeiten">✏</button>
+        <button class="todo-del" onclick="delTodo(${t.id},${id})">✕</button>
+      </div>
+      ${t.notiz?`<div style="font-size:12px;color:var(--t2);padding-left:32px;line-height:1.5;white-space:pre-wrap">${t.notiz}</div>`:''}
     </div>`).join(''):'<div style="color:var(--t2);font-size:13px;padding:10px 0">Keine Aufgaben</div>';
 
   // FOTOS HTML
@@ -2600,14 +2629,120 @@ function doBeauftragen(){
 }
 
 // ════════════════════════════════════
-// TODOS
+// PROJEKT-AUFGABEN ÜBERSICHT
 // ════════════════════════════════════
-function openTodoModal(projId){
+let todoStatusFilter = 'alle';
+
+function setTodoFilter(val, btn){
+  todoStatusFilter = val;
+  btn.closest('.fbar').querySelectorAll('.fpill').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderProjTodos();
+}
+
+function renderProjTodos(){
+  // Projekt-Dropdown befüllen
+  const sel = document.getElementById('todo-proj-filter');
+  if(sel){
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">Alle Projekte</option>' +
+      projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+    if(prev) sel.value = prev;
+  }
+
+  const projFilter = sel ? sel.value : '';
+  const c = document.getElementById('proj-todos-list');
+  if(!c) return;
+
+  let filtered = todos.filter(t => t.projId); // nur Projekt-Todos
+  if(projFilter) filtered = filtered.filter(t=>String(t.projId)===String(projFilter));
+  if(todoStatusFilter==='offen')    filtered = filtered.filter(t=>!t.done);
+  if(todoStatusFilter==='erledigt') filtered = filtered.filter(t=>t.done);
+  if(todoStatusFilter==='hoch')     filtered = filtered.filter(t=>t.prio==='hoch'&&!t.done);
+  if(todoStatusFilter==='faellig')  filtered = filtered.filter(t=>!t.done&&t.due&&t.due<today());
+
+  // Nach Projekt gruppieren
+  const byProj = {};
+  filtered.forEach(t=>{
+    const key = String(t.projId);
+    if(!byProj[key]) byProj[key]=[];
+    byProj[key].push(t);
+  });
+
+  if(!filtered.length){
+    c.innerHTML=`<div style="text-align:center;padding:40px;color:var(--t2)">
+      <div style="font-size:40px;margin-bottom:12px">✅</div>
+      <div>Keine Aufgaben gefunden</div>
+    </div>`;
+    return;
+  }
+
+  c.innerHTML = Object.entries(byProj).map(([projId, ptodos])=>{
+    const p = projects.find(x=>String(x.id)===String(projId));
+    const s = p ? (SC[p.typ]||SC.laufend) : SC.laufend;
+    const offen = ptodos.filter(t=>!t.done).length;
+    return`
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r);margin-bottom:14px;overflow:hidden">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="openDetail(${projId})">
+          <div style="width:4px;height:32px;border-radius:2px;background:${s.col};flex-shrink:0"></div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:14px">${p?p.name:'Unbekanntes Projekt'}</div>
+            <div style="font-size:12px;color:var(--t2)">${s.lbl}${p&&p.ort?' · '+p.ort:''}</div>
+          </div>
+          <div style="font-size:12px;font-weight:700;color:${offen>0?'var(--orange)':'var(--green)'}">
+            ${offen} offen / ${ptodos.length} gesamt
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openTodoModal(${projId})">＋</button>
+        </div>
+        ${ptodos.sort((a,b)=>a.done-b.done).map(t=>`
+          <div style="display:flex;flex-direction:column;gap:6px;padding:12px 16px;border-bottom:1px solid rgba(48,54,61,.3)">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="todo-check ${t.done?'done':''}" onclick="toggleTodoProjPage(${t.id})">${t.done?'✓':''}</div>
+              <span class="todo-text ${t.done?'done':''}" style="flex:1">${t.text}</span>
+              <span class="todo-prio prio-${t.prio}">${t.prio}</span>
+              ${t.due?`<span class="todo-due ${!t.done&&t.due<today()?'overdue':''}">${fmt(t.due)}</span>`:''}
+              <button class="edit-btn" onclick="openTodoModal(${t.projId},'${t.id}')" title="Bearbeiten">✏</button>
+              <button class="todo-del" onclick="delTodoProjPage(${t.id})">✕</button>
+            </div>
+            ${t.notiz?`<div style="font-size:12px;color:var(--t2);padding-left:32px;line-height:1.5;white-space:pre-wrap">${t.notiz}</div>`:''}
+          </div>`).join('')}
+      </div>`;
+  }).join('');
+}
+
+function toggleTodoProjPage(id){
+  const t=todos.find(x=>String(x.id)===String(id)); if(!t)return;
+  t.done=!t.done; saveAll(); renderProjTodos();
+}
+
+function delTodoProjPage(id){
+  confirmDelete('Aufgabe löschen?','Diese Aufgabe wird gelöscht.',
+    ()=>{ trackDeleted('todos',id); todos=todos.filter(x=>String(x.id)!==String(id)); saveAll(); renderProjTodos(); }
+  );
+}
+
+// ════════════════════════════════════
+// TODOS (Projekt-Detail)
+// ════════════════════════════════════
+function openTodoModal(projId, editId){
   currentTodoProjId=projId;
-  editTodoId=null;
-  document.getElementById('td-text').value='';
-  document.getElementById('td-prio').value='mittel';
-  document.getElementById('td-due').value='';
+  editTodoId=editId||null;
+  if(editId){
+    const t=todos.find(x=>String(x.id)===String(editId));
+    if(t){
+      document.getElementById('td-text').value=t.text||'';
+      document.getElementById('td-notiz').value=t.notiz||'';
+      document.getElementById('td-prio').value=t.prio||'mittel';
+      document.getElementById('td-due').value=t.due||'';
+      document.getElementById('todo-mttl').textContent='Aufgabe bearbeiten';
+    }
+  } else {
+    document.getElementById('td-text').value='';
+    document.getElementById('td-notiz').value='';
+    document.getElementById('td-prio').value='mittel';
+    document.getElementById('td-due').value='';
+    document.getElementById('todo-mttl').textContent='Aufgabe hinzufügen';
+  }
   document.getElementById('modal-todo').style.display='flex';
 }
 
@@ -2618,15 +2753,21 @@ function saveTodo(){
     id:editTodoId||Date.now(),
     projId:currentTodoProjId,
     text,
+    notiz:document.getElementById('td-notiz').value.trim(),
     prio:document.getElementById('td-prio').value,
     due:document.getElementById('td-due').value,
-    done:false,
+    done:editTodoId?((todos.find(x=>String(x.id)===String(editTodoId))||{}).done||false):false,
   };
   if(editTodoId){const i=todos.findIndex(x=>String(x.id)===String(editTodoId));if(i>-1)todos[i]=t;}
   else todos.push(t);
   closeModal('modal-todo');
   saveAll();
-  openDetail(currentTodoProjId);
+  // Seite aktualisieren
+  if(document.getElementById('page-proj-todos')?.classList.contains('active')){
+    renderProjTodos();
+  } else {
+    openDetail(currentTodoProjId);
+  }
 }
 
 function toggleTodo(id,projId){
