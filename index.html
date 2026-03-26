@@ -1619,24 +1619,50 @@ function updateBadges(){
 // ════════════════════════════════════
 function renderDashboard(){
   updateBadges();
-  const lauf=projects.filter(p=>p.typ==='laufend').length;
-  const done=projects.filter(p=>p.typ==='abgeschlossen').length;
-  const ang=projects.filter(p=>p.typ==='angebot'||p.typ==='angebot-offen').length;
-  const anf=projects.filter(p=>p.typ==='anfrage').length;
+  const lauf=projects.filter(p=>p.typ==='laufend');
+  const done=projects.filter(p=>p.typ==='abgeschlossen');
+  const angErstellt=projects.filter(p=>p.typ==='angebot');
+  const angOffen=projects.filter(p=>p.typ==='angebot-offen');
+  const anf=projects.filter(p=>p.typ==='anfrage');
   const h=zeiten.reduce((a,z)=>a+z.std,0);
   const rechBez=rechnungen.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
   const rechOff=rechnungen.filter(r=>r.status!=='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
+
   document.getElementById('dash-stats').innerHTML=`
-    <div class="stat s-blue"><div class="stat-ico">🔵</div><div class="stat-val">${lauf}</div><div class="stat-lbl">Laufende Projekte</div></div>
-    <div class="stat s-green"><div class="stat-ico">✅</div><div class="stat-val">${done}</div><div class="stat-lbl">Abgeschlossen</div></div>
-    <div class="stat s-accent"><div class="stat-ico">📄</div><div class="stat-val">${ang}</div><div class="stat-lbl">Angebote</div></div>
-    <div class="stat s-purple"><div class="stat-ico">📬</div><div class="stat-val">${anf}</div><div class="stat-lbl">Anfragen</div></div>
+    <div class="stat s-blue"><div class="stat-ico">🔵</div><div class="stat-val">${lauf.length}</div><div class="stat-lbl">Laufende Projekte</div></div>
+    <div class="stat s-green"><div class="stat-ico">✅</div><div class="stat-val">${done.length}</div><div class="stat-lbl">Abgeschlossen</div></div>
+    <div class="stat s-accent"><div class="stat-ico">📄</div><div class="stat-val">${angErstellt.length+angOffen.length}</div><div class="stat-lbl">Angebote</div></div>
+    <div class="stat s-purple"><div class="stat-ico">📬</div><div class="stat-val">${anf.length}</div><div class="stat-lbl">Anfragen</div></div>
     <div class="stat s-green"><div class="stat-ico">🧾</div><div class="stat-val">${num(rechBez)} €</div><div class="stat-lbl">Rechnungen bezahlt</div></div>
     <div class="stat s-orange"><div class="stat-ico">⏳</div><div class="stat-val">${num(rechOff)} €</div><div class="stat-lbl">Rechnungen offen</div></div>
     <div class="stat s-orange"><div class="stat-ico">⏱</div><div class="stat-val">${h}</div><div class="stat-lbl">Std. erfasst</div></div>
     <div class="stat s-red"><div class="stat-ico">👷</div><div class="stat-val">${workers.length}</div><div class="stat-lbl">Mitarbeiter</div></div>
   `;
-  renderProjCards('dashboard',projects);
+
+  // Gruppierte Ansicht mit Überschriften
+  const c = document.getElementById('list-dashboard');
+  if(!c) return;
+  const e = document.getElementById('empty-dashboard');
+
+  const sections = [
+    { label:'🔵 Laufende Projekte', color:'var(--blue)',   data: lauf },
+    { label:'📋 Angebote ausstehend', color:'var(--orange)', data: angOffen },
+    { label:'📄 Angebote erstellt',   color:'var(--accent)', data: angErstellt },
+    { label:'📬 Anfragen',            color:'var(--purple)', data: anf },
+    { label:'✅ Abgeschlossen',       color:'var(--green)',  data: done },
+  ].filter(s => s.data.length > 0);
+
+  if(!sections.length){ c.innerHTML=''; if(e) e.style.display='block'; return; }
+  if(e) e.style.display='none';
+
+  c.innerHTML = sections.map(sec => `
+    <div style="margin:20px 0 10px 0;display:flex;align-items:center;gap:10px">
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:${sec.color}">${sec.label}</div>
+      <div style="flex:1;height:1px;background:var(--border)"></div>
+      <div style="font-size:12px;color:var(--t2);font-weight:600">${sec.data.length} Projekt${sec.data.length!==1?'e':''}</div>
+    </div>
+    ${sec.data.map(p => renderProjCard(p)).join('')}
+  `).join('');
 }
 
 function getProjData(id){
@@ -1669,43 +1695,45 @@ function setAngFilter(val,btn){
   renderProjList('angebote');
 }
 
+function renderProjCard(p){
+  const s=SC[p.typ]||SC.laufend;
+  const pr=parseInt(p.prog)||0;
+  const pTodos=todos.filter(t=>t.projId===p.id&&!t.done).length;
+  const pFotos=fotos.filter(f=>f.projId===p.id).length;
+  const isAngebot=p.typ==='angebot'||p.typ==='angebot-offen';
+  return`<div class="pcard" onclick="openDetail(${p.id})">
+    <div class="pcard-bar" style="background:${s.col}"></div>
+    <div class="pcard-body">
+      <div class="pcard-name">${s.ico} ${p.name}</div>
+      <div class="pcard-meta">
+        ${p.kunde?`<span>👤 ${p.kunde}</span>`:''}
+        ${p.ort?`<span>📍 ${p.ort}</span>`:''}
+        ${p.ende?`<span>📅 ${fmt(p.ende)}</span>`:''}
+        ${(p.wertNetto||p.wert)?`<span>💶 ${num(p.wertNetto||p.wert)} € Netto</span>`:''}
+        ${pTodos?`<span style="color:var(--accent)">📋 ${pTodos} offen</span>`:''}
+        ${pFotos?`<span style="color:var(--blue)">📸 ${pFotos}</span>`:''}
+      </div>
+      ${(p.typ==='laufend'||p.typ==='abgeschlossen')?`<div class="pbar-wrap"><div class="pbar-fill" style="width:${pr}%;background:${s.col}"></div></div>`:''}
+    </div>
+    <div class="pcard-r" onclick="event.stopPropagation()">
+      <span class="badge ${s.bc}">${s.lbl}</span>
+      ${isAngebot?`<button class="beauftragen-btn" onclick="openBaufDialog(${p.id})">✅ Beauftragen</button>`:''}
+      ${p.typ==='angebot'||p.typ==='angebot-offen'?`<button class="btn btn-ghost btn-sm" onclick="mailtoAngebot(${p.id})" title="Angebot per Outlook senden">📧 Angebot senden</button>`:''}
+      ${p.typ==='anfrage'?`<button class="btn btn-ghost btn-sm" onclick="mailtoAnfrage(${p.id})" title="Anfragebestätigung senden">📧 Antworten</button>`:''}
+      ${p.od?`<a href="${p.od}" target="_blank" class="od-link">☁ OneDrive</a>`:''}
+      ${p.odFoto?`<a href="${p.odFoto}" target="_blank" class="od-link" style="color:var(--green);background:var(--gdim);border-color:rgba(63,185,80,.2)">📸 Fotos</a>`:''}
+      <button class="del-btn" onclick="delProject(${p.id})">🗑</button>
+    </div>
+  </div>`;
+}
+
 function renderProjCards(listId,data){
   const c=document.getElementById('list-'+listId);
   const e=document.getElementById('empty-'+listId);
   if(!c) return;
   if(!data.length){c.innerHTML='';if(e)e.style.display='block';return;}
   if(e) e.style.display='none';
-  const isAngebot=p=>p.typ==='angebot'||p.typ==='angebot-offen';
-  c.innerHTML=data.map(p=>{
-    const s=SC[p.typ]||SC.laufend;
-    const pr=parseInt(p.prog)||0;
-    const pTodos=todos.filter(t=>t.projId===p.id&&!t.done).length;
-    const pFotos=fotos.filter(f=>f.projId===p.id).length;
-    return`<div class="pcard" onclick="openDetail(${p.id})">
-      <div class="pcard-bar" style="background:${s.col}"></div>
-      <div class="pcard-body">
-        <div class="pcard-name">${s.ico} ${p.name}</div>
-        <div class="pcard-meta">
-          ${p.kunde?`<span>👤 ${p.kunde}</span>`:''}
-          ${p.ort?`<span>📍 ${p.ort}</span>`:''}
-          ${p.ende?`<span>📅 ${fmt(p.ende)}</span>`:''}
-          ${(p.wertNetto||p.wert)?`<span>💶 ${num(p.wertNetto||p.wert)} € Netto</span>`:''}
-          ${pTodos?`<span style="color:var(--accent)">📋 ${pTodos} offen</span>`:''}
-          ${pFotos?`<span style="color:var(--blue)">📸 ${pFotos}</span>`:''}
-        </div>
-        ${(p.typ==='laufend'||p.typ==='abgeschlossen')?`<div class="pbar-wrap"><div class="pbar-fill" style="width:${pr}%;background:${s.col}"></div></div>`:''}
-      </div>
-      <div class="pcard-r" onclick="event.stopPropagation()">
-        <span class="badge ${s.bc}">${s.lbl}</span>
-        ${isAngebot(p)?`<button class="beauftragen-btn" onclick="openBaufDialog(${p.id})">✅ Beauftragen</button>`:''}
-        ${p.typ==='angebot'||p.typ==='angebot-offen'?`<button class="btn btn-ghost btn-sm" onclick="mailtoAngebot(${p.id})" title="Angebot per Outlook senden">📧 Angebot senden</button>`:''}
-        ${p.typ==='anfrage'?`<button class="btn btn-ghost btn-sm" onclick="mailtoAnfrage(${p.id})" title="Anfragebestätigung senden">📧 Antworten</button>`:''}
-        ${p.od?`<a href="${p.od}" target="_blank" class="od-link">☁ OneDrive</a>`:''}
-        ${p.odFoto?`<a href="${p.odFoto}" target="_blank" class="od-link" style="color:var(--green);background:var(--gdim);border-color:rgba(63,185,80,.2)">📸 Fotos</a>`:''}
-        <button class="del-btn" onclick="delProject(${p.id})">🗑</button>
-      </div>
-    </div>`;
-  }).join('');
+  c.innerHTML=data.map(p=>renderProjCard(p)).join('');
 }
 
 function openProjModal(defaultTyp){
