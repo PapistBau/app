@@ -683,6 +683,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   <div class="nsec">Angebote & Anfragen</div>
   <div class="ni" data-page="angebote"><span class="nico">📄</span>Angebote<span class="nbadge" id="nb-angebot" style="display:none"></span></div>
   <div class="ni" data-page="anfragen"><span class="nico">📬</span>Anfragen<span class="nbadge" id="nb-anfrage" style="display:none"></span></div>
+  <div class="ni" data-page="archiv"><span class="nico">📦</span>Archiv</div>
   <hr class="ndiv">
   <div class="nsec">Rechnungen</div>
   <div class="ni" data-page="rechnungen"><span class="nico">🧾</span>Übersicht<span class="nbadge" id="nb-rech" style="display:none"></span></div>
@@ -761,6 +762,15 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   <div class="fbar"><input class="finput" placeholder="🔍 Suchen …" oninput="filterProj('anfrage',this.value)"></div>
   <div class="grid" id="list-anfragen"></div>
   <div class="empty" id="empty-anfragen" style="display:none"><div class="empty-ico">📬</div><div class="empty-ttl">Keine Anfragen</div></div>
+</div>
+
+<!-- ARCHIV -->
+<div class="page" id="page-archiv">
+  <div class="ph">
+    <div><div class="ph-title">Archiv</div><div class="ph-sub">Archivierte Projekte — Daten bleiben erhalten</div></div>
+  </div>
+  <div class="grid" id="list-archiv"></div>
+  <div class="empty" id="empty-archiv" style="display:none"><div class="empty-ico">📦</div><div class="empty-ttl">Kein Archiv</div><div class="empty-sub">Archivierte Projekte erscheinen hier</div></div>
 </div>
 
 <!-- ██ RECHNUNGEN ██ -->
@@ -1055,6 +1065,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div class="bni" data-page="abgeschlossen"><span class="nico">✅</span>Abgeschlossen</div>
     <div class="bni" data-page="angebote"><span class="nico">📋</span>Angebote</div>
     <div class="bni" data-page="anfragen"><span class="nico">💬</span>Anfragen</div>
+    <div class="bni" data-page="archiv"><span class="nico">📦</span>Archiv</div>
     <div class="bni" data-page="rechnungen"><span class="nico">🧾</span>Rechnungen</div>
     <div class="bni" data-page="rech-projekt"><span class="nico">🏗</span>Rg./Projekt</div>
     <div class="bni" data-page="az-erfassen"><span class="nico">⏱</span>Zeiten</div>
@@ -1600,6 +1611,7 @@ function goPage(id,el){
   if(id==='abgeschlossen') renderProjList('abgeschlossen');
   if(id==='angebote') renderProjList('angebote');
   if(id==='anfragen') renderProjList('anfragen');
+  if(id==='archiv') renderProjList('archiv');
   if(id==='controlling'){ initCtrlYear(); renderControlling(); }
   if(id==='material'){ renderMaterial(); }
   if(id==='allg-todos') renderAllgTodos();
@@ -1697,11 +1709,14 @@ function renderDashboard(){
 }
 
 function getProjData(id){
-  if(id==='laufend') return projects.filter(p=>p.typ==='laufend');
-  if(id==='abgeschlossen') return projects.filter(p=>p.typ==='abgeschlossen');
-  if(id==='angebote') return projects.filter(p=>p.typ==='angebot'||p.typ==='angebot-offen');
-  if(id==='anfragen') return projects.filter(p=>p.typ==='anfrage');
-  return projects;
+  // Archivierte immer ausblenden außer in der Archiv-Ansicht
+  const aktiv = p => !p.archiviert;
+  if(id==='laufend')       return projects.filter(p=>p.typ==='laufend' && aktiv(p));
+  if(id==='abgeschlossen') return projects.filter(p=>p.typ==='abgeschlossen' && aktiv(p));
+  if(id==='angebote')      return projects.filter(p=>(p.typ==='angebot'||p.typ==='angebot-offen') && aktiv(p));
+  if(id==='anfragen')      return projects.filter(p=>p.typ==='anfrage' && aktiv(p));
+  if(id==='archiv')        return projects.filter(p=>p.archiviert);
+  return projects.filter(aktiv);
 }
 
 function renderProjList(id){
@@ -2374,19 +2389,33 @@ function toggleZeitGesperrt(id){
   toast(p.zeitGesperrt ? '🔒 Zeiterfassung gesperrt' : '🔓 Zeiterfassung freigegeben');
 }
 
+function unarchiveProject(id){
+  const i=projects.findIndex(x=>x.id===id);
+  if(i>-1){
+    projects[i].archiviert=false;
+    projects[i]._syncSession=SYNC_SESSION;
+    saveAll();
+    closeModal('modal-detail');
+    renderDashboard();
+    toast('✅ Projekt wiederhergestellt');
+  }
+}
+
 function delProject(id){
   const p=projects.find(x=>x.id===id);
   confirmDelete(
-    'Projekt löschen?',
-    p?`"${p.name}" wird gelöscht. Alle Fotos und Aufgaben werden ebenfalls entfernt.`:'Dieses Projekt wird gelöscht.',
+    'Projekt archivieren?',
+    p?`"${p.name}" wird archiviert und ausgeblendet. Alle Stunden und Daten bleiben erhalten.`:'Dieses Projekt wird archiviert.',
     async ()=>{
-      await trackDeleted('projects', id);
-      projects=projects.filter(x=>x.id!==id);
-      todos=todos.filter(t=>t.projId!==id);
-      fotos=fotos.filter(f=>f.projId!==id);
+      // Nicht wirklich löschen — nur als archiviert markieren
+      const i=projects.findIndex(x=>x.id===id);
+      if(i>-1){
+        projects[i].archiviert=true;
+        projects[i]._syncSession=SYNC_SESSION;
+      }
       closeModal('modal-detail');
       saveAll();renderDashboard();
-      toast('🗑 Projekt gelöscht','var(--red)');
+      toast('📦 Projekt archiviert','var(--t2)');
     }
   );
 }
@@ -2539,7 +2568,10 @@ function openDetail(id){
     </div>
 
     <div class="mfooter">
-      <button class="btn btn-danger btn-sm" onclick="delProject(${id})">🗑 Löschen</button>
+      ${p.archiviert
+        ? `<button class="btn btn-primary btn-sm" onclick="unarchiveProject(${id})">📦 Wiederherstellen</button>`
+        : `<button class="btn btn-danger btn-sm" onclick="delProject(${id})">📦 Archivieren</button>`
+      }
       <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-detail')">Schließen</button>
       ${p.email&&(isAng)?`<button class="btn btn-blue btn-sm" onclick="mailtoAngebot(${id})">📧 Angebot senden</button>`:''}
       ${p.email&&p.typ==='anfrage'?`<button class="btn btn-blue btn-sm" onclick="mailtoAnfrage(${id})">📧 Antworten</button>`:''}
