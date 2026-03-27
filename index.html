@@ -4508,23 +4508,7 @@ let editKatId   = null;
 let editAllgTodoId = null;
 let currentKatId   = null;
 let selectedKatColor = '#f0a500';
-
-// Seed
-if(!kategorien.length){
-  kategorien=[
-    {id:1,name:'Büro & Verwaltung',color:'#58a6ff'},
-    {id:2,name:'Einkauf & Material',color:'#f0a500'},
-    {id:3,name:'Allgemein',color:'#3fb950'},
-  ];
-  allgTodos=[
-    {id:1,katId:1,text:'Steuererklärung vorbereiten',prio:'hoch',due:'2025-06-30',done:false,notiz:''},
-    {id:2,katId:1,text:'Angebote archivieren',prio:'mittel',due:'',done:false,notiz:''},
-    {id:3,katId:2,text:'Zementpreise vergleichen',prio:'niedrig',due:'',done:true,notiz:'Günstigster: Bauhaus'},
-    {id:4,katId:3,text:'Fahrzeug TÜV anmelden',prio:'hoch',due:'2025-05-15',done:false,notiz:''},
-  ];
-  localStorage.setItem('bm_kat',JSON.stringify(kategorien));
-  localStorage.setItem('bm_allgtodos',JSON.stringify(allgTodos));
-}
+// Keine Demo-Daten mehr
 
 function saveKatData(){
   saveAll();
