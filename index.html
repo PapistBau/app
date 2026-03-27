@@ -3479,7 +3479,7 @@ function renderZeitList(){
   em.style.display='none';
   c.innerHTML=[...zeiten].sort((a,b)=>b.datum.localeCompare(a.datum)).map(z=>{
     const w=workers.find(x=>x.id===z.maId);
-    const p=projects.find(x=>x.id===z.projId);
+    const p=projects.find(x=>String(x.id)===String(z.projId));
     const ini=w?(w.vorname[0]+w.nachname[0]).toUpperCase():'?';
     const ci='av-'+(workers.indexOf(w)%6||0);
     return`<div class="zt-row">
@@ -3527,7 +3527,7 @@ function renderWeek(){
       const entries=zeiten.filter(z=>z.datum===d&&z.maId===w.id);
       const h=entries.reduce((a,z)=>a+z.std,0);total+=h;
       if(!entries.length)return'<td style="color:var(--t3)">–</td>';
-      return`<td>${entries.map(z=>{const p=projects.find(x=>x.id===z.projId);return`<div class="we"><span class="we-h">${z.std}</span><span style="color:var(--t2);font-size:11px">${p?p.name.slice(0,12)+'…':''}</span></div>`;}).join('')}</td>`;
+      return`<td>${entries.map(z=>{const p=projects.find(x=>String(x.id)===String(z.projId));return`<div class="we"><span class="we-h">${z.std}</span><span style="color:var(--t2);font-size:11px">${p?p.name.slice(0,12)+'…':''}</span></div>`;}).join('')}</td>`;
     }).join('');
     return`<tr><td style="white-space:nowrap"><div style="display:flex;align-items:center;gap:8px"><div class="ma-av ${cls}" style="width:30px;height:30px;font-size:12px">${ini}</div><div><div style="font-weight:600;font-size:13px">${w.vorname} ${w.nachname}</div><div style="font-size:11px;color:var(--t2)">${w.rolle||''}</div></div></div></td>${cells}<td><span style="font-family:'Bebas Neue';font-size:22px;color:var(--accent)">${total}</span><span style="font-size:11px;color:var(--t2)"> h</span></td></tr>`;
   }).join('');
@@ -3786,7 +3786,7 @@ function buildMaStundenliste(maId, month){
   const lohnGesamt=totalH*(w.lohn||0);
 
   const rows=wZ.map((z,i)=>{
-    const p=projects.find(x=>x.id===z.projId);
+    const p=projects.find(x=>String(x.id)===String(z.projId));
     return`<tr style="${i%2===0?'background:#f9f9f9':''}">
       <td>${fmt(z.datum)}</td>
       <td>${z.std} h</td>
@@ -3971,7 +3971,7 @@ function exportCSV(type){
     rows=[['Datum','Mitarbeiter','Stunden','Von-Bis','Baustelle','Notiz']];
     [...zeiten].sort((a,b)=>b.datum.localeCompare(a.datum)).forEach(z=>{
       const w=workers.find(x=>x.id===z.maId);
-      const p=projects.find(x=>x.id===z.projId);
+      const p=projects.find(x=>String(x.id)===String(z.projId));
       rows.push([z.datum,w?w.vorname+' '+w.nachname:'?',z.std,z.zeit||'',p?p.name:'?',z.notiz||'']);
     });
   } else if(type==='rechnungen'){
@@ -5418,7 +5418,7 @@ function renderMaZeiterfassung(maId, filterMonth){
         </select>
       </div>
       ${myZeiten.length ? myZeiten.map(z=>{
-        const p=projects.find(x=>x.id===z.projId);
+        const p=projects.find(x=>String(x.id)===String(z.projId));
         const zid=String(z.id);
         return`<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid rgba(48,54,61,.4)">
           <div style="flex:1;min-width:0">
