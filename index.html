@@ -3729,7 +3729,12 @@ function renderReport(){
     </div>` : '<div class="empty"><div class="empty-ico">🏗</div><div class="empty-ttl">Keine Stunden in diesem Zeitraum</div></div>';
 
   // ── TAB 3: GESAMT ──
-  const byP2={};mZ.forEach(z=>{byP2[z.projId]=(byP2[z.projId]||0)+z.std;});
+  const byP2={};
+  const abwStunden={urlaub:0,feiertag:0,krank:0,'urlaub-unbezahlt':0};
+  mZ.forEach(z=>{
+    if(z.art&&z.art!=='arbeit'){ abwStunden[z.art]=(abwStunden[z.art]||0)+z.std; }
+    else { byP2[z.projId]=(byP2[z.projId]||0)+z.std; }
+  });
   document.getElementById('rep-bs').innerHTML=`
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px">
       <div class="stat s-accent"><div class="stat-ico">⏱</div><div class="stat-val">${totalH}</div><div class="stat-lbl">Gesamtstunden</div></div>
@@ -3747,14 +3752,29 @@ function renderReport(){
             const sc=p?SC[p.typ]||SC.laufend:SC.laufend;
             return`<div style="margin-bottom:10px">
               <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:3px">
-                <span>${sc.ico} ${p?p.name:'Unbekannt'}</span>
+                <span>${sc.ico} ${p?p.name:'–'}</span>
                 <span style="font-family:'Bebas Neue';font-size:18px;color:var(--accent)">${h} h <span style="font-size:12px;color:var(--t2)">${pct}%</span></span>
               </div>
               <div style="background:var(--border);border-radius:3px;height:5px;overflow:hidden">
                 <div style="width:${pct}%;height:100%;background:${sc.col};border-radius:3px"></div>
               </div>
             </div>`;
-          }).join('')||'<div style="color:var(--t2)">Keine Daten</div>'}
+          }).join('')}
+          ${Object.entries(abwStunden).filter(([,h])=>h>0).map(([art,h])=>{
+            const artLabel={urlaub:'🏖 Urlaub',feiertag:'🎉 Feiertag',krank:'🤒 Krank','urlaub-unbezahlt':'📋 Unbez. Urlaub'};
+            const pct=totalH>0?Math.round(h/totalH*100):0;
+            const col={urlaub:'var(--blue)',feiertag:'var(--green)',krank:'var(--red)','urlaub-unbezahlt':'var(--t2)'};
+            return`<div style="margin-bottom:10px">
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:3px">
+                <span>${artLabel[art]||art}</span>
+                <span style="font-family:'Bebas Neue';font-size:18px;color:var(--accent)">${h} h <span style="font-size:12px;color:var(--t2)">${pct}%</span></span>
+              </div>
+              <div style="background:var(--border);border-radius:3px;height:5px;overflow:hidden">
+                <div style="width:${pct}%;height:100%;background:${col[art]||'var(--t2)'};border-radius:3px"></div>
+              </div>
+            </div>`;
+          }).join('')}
+          ${!Object.keys(byP2).length&&!Object.values(abwStunden).some(h=>h>0)?'<div style="color:var(--t2)">Keine Daten</div>':''}
         </div>
       </div>
       <div class="rep-card">
