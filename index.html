@@ -3588,30 +3588,44 @@ function renderReport(){
   if(!month&&!repAllMonths) return;
   const mZ = repAllMonths ? zeiten : zeiten.filter(z=>z.datum.startsWith(month));
   const label = repAllMonths ? 'Gesamt (alle Zeiten)' : month;
-  const totalH=mZ.reduce((a,z)=>a+z.std,0);
-  const totalL=workers.reduce((a,w)=>{const h=mZ.filter(z=>z.maId===w.id).reduce((x,z)=>x+z.std,0);return a+h*(w.lohn||0);},0);
+
+  // Nur echte Arbeitsstunden für Lohn/Summe
+  const arbeitsZ = mZ.filter(z=>!z.art||z.art==='arbeit');
+  const abwesZ   = mZ.filter(z=>z.art&&z.art!=='arbeit');
+  const totalH=arbeitsZ.reduce((a,z)=>a+z.std,0);
+  const totalL=workers.reduce((a,w)=>{const h=arbeitsZ.filter(z=>String(z.maId)===String(w.id)).reduce((x,z)=>x+z.std,0);return a+h*(w.lohn||0);},0);
 
   // ── TAB 1: NACH MITARBEITER ──
   const maCards = workers.map((w,wi)=>{
-    const wZ=mZ.filter(z=>z.maId===w.id);
+    const wZ=arbeitsZ.filter(z=>String(z.maId)===String(w.id));
+    const wAbw=abwesZ.filter(z=>String(z.maId)===String(w.id));
     const h=wZ.reduce((a,z)=>a+z.std,0);
-    if(!h) return '';
+    if(!h && !wAbw.length) return '';
     const l=h*(w.lohn||0);
     const ini=(w.vorname[0]+w.nachname[0]).toUpperCase();
     const cls='av-'+(wi%6);
     const byP={};wZ.forEach(z=>{byP[z.projId]=(byP[z.projId]||0)+z.std;});
     const sortedP=Object.entries(byP).sort((a,b)=>b[1]-a[1]);
+    // Abwesenheiten zählen
+    const urlaubTage=wAbw.filter(z=>z.art==='urlaub').length;
+    const krankTage=wAbw.filter(z=>z.art==='krank').length;
+    const feiertagTage=wAbw.filter(z=>z.art==='feiertag').length;
+    const unbezTage=wAbw.filter(z=>z.art==='urlaub-unbezahlt').length;
     return`<div class="rep-card">
       <div class="rep-ch"><div class="ma-av ${cls}" style="width:36px;height:36px;font-size:15px">${ini}</div>
         <div><div style="font-weight:600">${w.vorname} ${w.nachname}</div><div style="font-size:12px;color:var(--t2)">${w.rolle||'Mitarbeiter'}</div></div>
       </div>
       <div class="rep-cb">
-        <div class="rep-row"><span class="rep-lbl">Stunden gesamt</span><span class="rep-val">${h} h</span></div>
+        <div class="rep-row"><span class="rep-lbl">Arbeitsstunden</span><span class="rep-val">${h} h</span></div>
         ${w.lohn?`<div class="rep-row"><span class="rep-lbl">Lohn (${w.lohn} €/h)</span><span class="rep-val" style="color:var(--green)">${num(l)} €</span></div>`:''}
-        <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+        ${urlaubTage?`<div class="rep-row"><span class="rep-lbl">🏖 Urlaub</span><span class="rep-val">${urlaubTage} Tag${urlaubTage!==1?'e':''}</span></div>`:''}
+        ${krankTage?`<div class="rep-row"><span class="rep-lbl">🤒 Krank</span><span class="rep-val" style="color:var(--red)">${krankTage} Tag${krankTage!==1?'e':''}</span></div>`:''}
+        ${feiertagTage?`<div class="rep-row"><span class="rep-lbl">🎉 Feiertag</span><span class="rep-val">${feiertagTage} Tag${feiertagTage!==1?'e':''}</span></div>`:''}
+        ${unbezTage?`<div class="rep-row"><span class="rep-lbl">📋 Unbez. Urlaub</span><span class="rep-val">${unbezTage} Tag${unbezTage!==1?'e':''}</span></div>`:''}
+        ${sortedP.length?`<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
           <div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Je Baustelle</div>
           ${sortedP.map(([pid,ph])=>{
-            const p=projects.find(x=>x.id==pid);
+            const p=projects.find(x=>String(x.id)==String(pid));
             const pct=h>0?Math.round(ph/h*100):0;
             return`<div style="margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
@@ -3622,8 +3636,8 @@ function renderReport(){
                 <div style="width:${pct}%;height:100%;background:var(--accent);border-radius:3px"></div>
               </div>
             </div>`;
-          }).join('')||'<div style="color:var(--t2);font-size:12px">Keine Stunden</div>'}
-        </div>
+          }).join('')}
+        </div>`:'' }
       </div>
     </div>`;
   }).filter(Boolean);
@@ -5443,13 +5457,27 @@ function renderMaZeiterfassung(maId, filterMonth){
           <input type="date" class="fi" id="ma-z-datum" value="${today()}" style="font-size:16px">
         </div>
 
+        <!-- Art der Buchung -->
         <div>
-          <label class="fl">Baustelle / Projekt *</label>
-          <select class="fs" id="ma-z-proj" style="font-size:16px;width:100%">
-            <option value="">— Baustelle wählen —</option>
-            ${projOptions}
-          </select>
+          <label class="fl">Art *</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="ma-z-art-buttons">
+            <button type="button" class="ma-art-btn active" data-art="arbeit" onclick="setMaArt('arbeit',this)" style="padding:12px;border:2px solid var(--accent);border-radius:10px;background:var(--accent);color:#000;font-weight:700;font-size:14px;cursor:pointer">⚒ Arbeit</button>
+            <button type="button" class="ma-art-btn" data-art="urlaub" onclick="setMaArt('urlaub',this)" style="padding:12px;border:2px solid var(--border);border-radius:10px;background:var(--card2);color:var(--t2);font-weight:600;font-size:14px;cursor:pointer">🏖 Urlaub</button>
+            <button type="button" class="ma-art-btn" data-art="feiertag" onclick="setMaArt('feiertag',this)" style="padding:12px;border:2px solid var(--border);border-radius:10px;background:var(--card2);color:var(--t2);font-weight:600;font-size:14px;cursor:pointer">🎉 Feiertag</button>
+            <button type="button" class="ma-art-btn" data-art="krank" onclick="setMaArt('krank',this)" style="padding:12px;border:2px solid var(--border);border-radius:10px;background:var(--card2);color:var(--t2);font-weight:600;font-size:14px;cursor:pointer">🤒 Krank</button>
+            <button type="button" class="ma-art-btn" data-art="urlaub-unbezahlt" onclick="setMaArt('urlaub-unbezahlt',this)" style="padding:12px;border:2px solid var(--border);border-radius:10px;background:var(--card2);color:var(--t2);font-weight:600;font-size:14px;cursor:pointer">📋 Unbez. Urlaub</button>
+          </div>
         </div>
+
+        <!-- Arbeit: Projekt + Zeiten -->
+        <div id="ma-z-arbeit-felder">
+          <div style="margin-bottom:14px">
+            <label class="fl">Baustelle / Projekt *</label>
+            <select class="fs" id="ma-z-proj" style="font-size:16px;width:100%">
+              <option value="">— Baustelle wählen —</option>
+              ${projOptions}
+            </select>
+          </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div>
@@ -5576,9 +5604,18 @@ function renderMaZeiterfassung(maId, filterMonth){
           <label class="fl">Notiz</label>
           <input class="fi" id="ma-z-notiz" placeholder="z.B. Fliesenlegen Bad OG" style="font-size:16px">
         </div>
+        </div><!-- Ende ma-z-arbeit-felder -->
+
+        <!-- Notiz für Abwesenheit -->
+        <div id="ma-z-abwesenheit-felder" style="display:none">
+          <div>
+            <label class="fl">Notiz (optional)</label>
+            <input class="fi" id="ma-z-abw-notiz" placeholder="z.B. AU-Schein liegt vor" style="font-size:16px">
+          </div>
+        </div>
 
         <button class="btn btn-primary" style="padding:16px;font-size:16px;font-weight:700;border-radius:12px" onclick="saveMaZeit('${maId}')">
-          💾 Stunden speichern
+          💾 Speichern
         </button>
         <div id="ma-save-msg" style="text-align:center;font-size:14px;min-height:20px;font-weight:600"></div>
       </div>
@@ -5605,9 +5642,13 @@ function renderMaZeiterfassung(maId, filterMonth){
         const zid=String(z.id);
         return`<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid rgba(48,54,61,.4)">
           <div style="flex:1;min-width:0">
-            <div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p?p.name:'–'}</div>
+            <div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              ${z.art&&z.art!=='arbeit'
+                ? `<span style="color:${z.art==='krank'?'var(--red)':z.art==='urlaub'?'var(--blue)':z.art==='feiertag'?'var(--green)':'var(--t2)'}">${z.notiz||z.art}</span>`
+                : (p?p.name:'–')}
+            </div>
             <div style="font-size:12px;color:var(--t2);margin-top:3px">
-              📅 ${fmt(z.datum)}${z.zeit?' · 🕐 '+z.zeit:''}${z.pause?' · ☕ '+z.pause+' Min. Pause':''}${z.notiz?' · '+z.notiz:''}
+              📅 ${fmt(z.datum)}${z.zeit?' · 🕐 '+z.zeit:''}${z.pause?' · ☕ '+z.pause+' Min. Pause':''}${z.art==='arbeit'&&z.notiz?' · '+z.notiz:''}
             </div>
           </div>
           <div style="font-family:'Bebas Neue',sans-serif;font-size:28px;color:var(--accent);flex-shrink:0">${z.std} h</div>
@@ -5644,45 +5685,85 @@ function calcMaStunden(){
   detail.textContent = `${von} – ${bis} · ${pause} Min. Pause`;
 }
 
+let maAktuelleArt = 'arbeit';
+
+function setMaArt(art, btn){
+  maAktuelleArt = art;
+  // Buttons stylen
+  document.querySelectorAll('.ma-art-btn').forEach(b=>{
+    b.style.borderColor='var(--border)';
+    b.style.background='var(--card2)';
+    b.style.color='var(--t2)';
+  });
+  btn.style.borderColor='var(--accent)';
+  btn.style.background='var(--accent)';
+  btn.style.color='#000';
+  // Felder ein/ausblenden
+  const arbeit = document.getElementById('ma-z-arbeit-felder');
+  const abwes  = document.getElementById('ma-z-abwesenheit-felder');
+  if(art==='arbeit'){
+    if(arbeit) arbeit.style.display='block';
+    if(abwes)  abwes.style.display='none';
+  } else {
+    if(arbeit) arbeit.style.display='none';
+    if(abwes)  abwes.style.display='block';
+  }
+}
+
 function saveMaZeit(maId){
   const datum = document.getElementById('ma-z-datum').value;
-  const projId = parseInt(document.getElementById('ma-z-proj').value);
-  const von = document.getElementById('ma-z-von')?.value;
-  const bis = document.getElementById('ma-z-bis')?.value;
-  const pause = parseInt(document.getElementById('ma-z-pause')?.value)||0;
-  const msg = document.getElementById('ma-save-msg');
+  const msg   = document.getElementById('ma-save-msg');
+  const art   = maAktuelleArt || 'arbeit';
 
-  if(!datum||!projId){msg.style.color='var(--red)';msg.textContent='Bitte Datum und Baustelle ausfüllen.';return;}
-  if(!von||!bis){msg.style.color='var(--red)';msg.textContent='Bitte Von und Bis Uhrzeit eintragen.';return;}
+  if(!datum){ msg.style.color='var(--red)'; msg.textContent='Bitte Datum ausfüllen.'; return; }
 
-  const [vh,vm] = von.split(':').map(Number);
-  const [bh,bm] = bis.split(':').map(Number);
-  let totalMin = (bh*60+bm) - (vh*60+vm);
-  if(totalMin < 0) totalMin += 24*60;
-  const nettoMin = Math.max(0, totalMin - pause);
-  const std = Math.round(nettoMin/60*100)/100;
+  let z;
+  if(art === 'arbeit'){
+    const projId = parseInt(document.getElementById('ma-z-proj').value);
+    const von    = document.getElementById('ma-z-von')?.value;
+    const bis    = document.getElementById('ma-z-bis')?.value;
+    const pause  = parseInt(document.getElementById('ma-z-pause')?.value)||0;
+    if(!projId){ msg.style.color='var(--red)'; msg.textContent='Bitte Baustelle ausfüllen.'; return; }
+    if(!von||!bis){ msg.style.color='var(--red)'; msg.textContent='Bitte Von und Bis eintragen.'; return; }
+    const [vh,vm]=von.split(':').map(Number);
+    const [bh,bm]=bis.split(':').map(Number);
+    let totalMin=(bh*60+bm)-(vh*60+vm);
+    if(totalMin<0) totalMin+=24*60;
+    const nettoMin=Math.max(0,totalMin-pause);
+    const std=Math.round(nettoMin/60*100)/100;
+    if(std<=0){ msg.style.color='var(--red)'; msg.textContent='Arbeitszeit muss größer als 0 sein.'; return; }
+    z={id:Date.now(),datum,maId:parseInt(maId)||maId,projId,std,
+      zeit:`${von} – ${bis}`,pause,
+      art:'arbeit',
+      notiz:document.getElementById('ma-z-notiz').value.trim(),
+      _syncSession:SYNC_SESSION};
+  } else {
+    // Abwesenheit — kein Projekt, 8h Standard
+    const artLabels = {urlaub:'🏖 Urlaub',feiertag:'🎉 Feiertag',krank:'🤒 Krank','urlaub-unbezahlt':'📋 Unbez. Urlaub'};
+    const stdFuerArt = art==='urlaub-unbezahlt' ? 0 : 8;
+    z={id:Date.now(),datum,maId:parseInt(maId)||maId,projId:null,std:stdFuerArt,
+      art, zeit:'',pause:0,
+      notiz:(document.getElementById('ma-z-abw-notiz')?.value.trim())||artLabels[art]||art,
+      _syncSession:SYNC_SESSION};
+  }
 
-  if(std <= 0){msg.style.color='var(--red)';msg.textContent='Arbeitszeit muss größer als 0 sein.';return;}
-
-  const z = {
-    id: Date.now(),
-    datum, maId: parseInt(maId)||maId, projId, std,
-    zeit: `${von} – ${bis}`,
-    pause: pause,
-    notiz: document.getElementById('ma-z-notiz').value.trim()
-  };
-  z._syncSession=SYNC_SESSION; zeiten.unshift(z);
+  zeiten.unshift(z);
   saveAll();
   msg.style.color='var(--green)';
-  msg.textContent=`✅ ${std.toString().replace('.',',')} Stunden gespeichert!`;
+  msg.textContent = art==='arbeit' ? `✅ ${z.std.toString().replace('.',',')} Stunden gespeichert!` : `✅ ${z.notiz} eingetragen!`;
   // Felder leeren
-  document.getElementById('ma-z-von').value='';
-  document.getElementById('ma-z-bis').value='';
-  document.getElementById('ma-z-pause').value='0';
-  document.getElementById('ma-z-notiz').value='';
-  document.getElementById('ma-z-calc').style.display='none';
+  if(art==='arbeit'){
+    document.getElementById('ma-z-von').value='';
+    document.getElementById('ma-z-bis').value='';
+    document.getElementById('ma-z-pause').value='0';
+    document.getElementById('ma-z-notiz').value='';
+    document.getElementById('ma-z-calc').style.display='none';
+  } else {
+    if(document.getElementById('ma-z-abw-notiz')) document.getElementById('ma-z-abw-notiz').value='';
+  }
   setTimeout(()=>{msg.textContent='';renderMaZeiterfassung(maId, datum.slice(0,7));},1500);
 }
+
 
 function deleteMaZeit(zid, maId){
   const z=zeiten.find(x=>String(x.id)===String(zid));
