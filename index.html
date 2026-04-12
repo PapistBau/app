@@ -5371,7 +5371,19 @@ function loginAsAdmin(){
   renderDashboard();
 }
 
+// Brute-Force Schutz
+let pinFehlversuche = 0;
+let pinGesperrtBis = 0;
+const PIN_MAX_VERSUCHE = 5;
+const PIN_SPERRE_MS = 2 * 60 * 1000; // 2 Minuten
+
 function pinPress(key){
+  // Gesperrt?
+  if(Date.now() < pinGesperrtBis){
+    const restSek = Math.ceil((pinGesperrtBis - Date.now()) / 1000);
+    document.getElementById('login-error').textContent=`🔒 Gesperrt — noch ${restSek} Sekunden`;
+    return;
+  }
   if(key==='del'){
     pinBuffer=pinBuffer.slice(0,-1);
     updatePinDots();
@@ -5392,18 +5404,47 @@ function updatePinDots(){
 }
 
 function checkPin(){
+  // Gesperrt?
+  if(Date.now() < pinGesperrtBis){
+    pinBuffer=''; updatePinDots(); return;
+  }
+
   const ma=workers.find(w=>w.pin&&w.pin===pinBuffer);
   if(ma){
+    pinFehlversuche=0; // Reset bei Erfolg
     loginAsMitarbeiter(ma);
     return;
   }
+
+  // Fehlversuch
+  pinFehlversuche++;
   for(let i=0;i<4;i++) document.getElementById('dot-'+i).className='pin-dot error';
-  document.getElementById('login-error').textContent='Falsche PIN – bitte erneut versuchen';
-  setTimeout(()=>{
-    pinBuffer='';
-    updatePinDots();
-    document.getElementById('login-error').textContent='';
-  },1200);
+
+  if(pinFehlversuche >= PIN_MAX_VERSUCHE){
+    pinGesperrtBis = Date.now() + PIN_SPERRE_MS;
+    pinFehlversuche = 0;
+    document.getElementById('login-error').textContent='🔒 5 Fehlversuche — gesperrt für 2 Minuten';
+    // Countdown anzeigen
+    const countdown = setInterval(()=>{
+      const rest = Math.ceil((pinGesperrtBis - Date.now()) / 1000);
+      const el = document.getElementById('login-error');
+      if(rest <= 0){
+        clearInterval(countdown);
+        if(el) el.textContent='';
+        pinBuffer=''; updatePinDots();
+      } else if(el){
+        el.textContent=`🔒 Gesperrt — noch ${rest} Sekunden`;
+      }
+    }, 1000);
+  } else {
+    const rest = PIN_MAX_VERSUCHE - pinFehlversuche;
+    document.getElementById('login-error').textContent=`Falsche PIN – noch ${rest} Versuch${rest!==1?'e':''}`;
+    setTimeout(()=>{
+      pinBuffer=''; updatePinDots();
+      const el = document.getElementById('login-error');
+      if(el && !el.textContent.includes('Gesperrt')) el.textContent='';
+    },1200);
+  }
 }
 
 async function loginAsMitarbeiter(ma){
