@@ -3691,6 +3691,198 @@ function openProjAuswertung(projId){
   modal.style.display='flex';
 }
 
+// Mitarbeiter-Auswertung Zeitraum (von Datum bis Datum)
+function openMaZeitraumAuswertung(maId){
+  const w = workers.find(x=>String(x.id)===String(maId));
+  if(!w){ toast('Mitarbeiter nicht gefunden','var(--orange)'); return; }
+
+  // Standard: aktueller Monat
+  const heute = new Date();
+  const ersterDesMonats = new Date(heute.getFullYear(), heute.getMonth(), 1).toISOString().slice(0,10);
+  const heuteStr = heute.toISOString().slice(0,10);
+
+  let modal = document.getElementById('modal-ma-zeitraum');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'modal-ma-zeitraum';
+    modal.className = 'overlay';
+    modal.style.display='none';
+    modal.onclick = (e)=>{ if(e.target===modal) closeModal('modal-ma-zeitraum'); };
+    document.body.appendChild(modal);
+  }
+
+  // Initial mit aktuellem Monat
+  modal.innerHTML = `<div class="modal" style="max-width:1100px;width:95%;max-height:90vh;overflow:auto">
+    <div class="mttl">📊 Zeitraum-Auswertung — ${w.vorname} ${w.nachname}</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;align-items:end">
+      <div>
+        <label class="fl">Von</label>
+        <input type="date" class="fi" id="maz-von" value="${ersterDesMonats}" onchange="renderMaZeitraum('${maId}')">
+      </div>
+      <div>
+        <label class="fl">Bis</label>
+        <input type="date" class="fi" id="maz-bis" value="${heuteStr}" onchange="renderMaZeitraum('${maId}')">
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="fpill" onclick="setMaZeitraumPreset('${maId}','aktMonat')">Aktueller Monat</button>
+        <button class="fpill" onclick="setMaZeitraumPreset('${maId}','vorMonat')">Vormonat</button>
+        <button class="fpill" onclick="setMaZeitraumPreset('${maId}','aktJahr')">Dieses Jahr</button>
+        <button class="fpill" onclick="setMaZeitraumPreset('${maId}','alle')">Gesamt</button>
+      </div>
+    </div>
+    <div id="maz-content"></div>
+    <div class="mfooter">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-ma-zeitraum')">Schließen</button>
+      <button class="btn btn-green btn-sm" onclick="exportMaZeitraumExcel('${maId}')">📊 Excel Export</button>
+    </div>
+  </div>`;
+  modal.style.display='flex';
+  renderMaZeitraum(maId);
+}
+
+function setMaZeitraumPreset(maId, preset){
+  const heute = new Date();
+  let von, bis;
+  if(preset==='aktMonat'){
+    von = new Date(heute.getFullYear(), heute.getMonth(), 1).toISOString().slice(0,10);
+    bis = heute.toISOString().slice(0,10);
+  } else if(preset==='vorMonat'){
+    von = new Date(heute.getFullYear(), heute.getMonth()-1, 1).toISOString().slice(0,10);
+    bis = new Date(heute.getFullYear(), heute.getMonth(), 0).toISOString().slice(0,10);
+  } else if(preset==='aktJahr'){
+    von = new Date(heute.getFullYear(), 0, 1).toISOString().slice(0,10);
+    bis = heute.toISOString().slice(0,10);
+  } else if(preset==='alle'){
+    von = '2020-01-01';
+    bis = heute.toISOString().slice(0,10);
+  }
+  document.getElementById('maz-von').value = von;
+  document.getElementById('maz-bis').value = bis;
+  renderMaZeitraum(maId);
+}
+
+function renderMaZeitraum(maId){
+  const von = document.getElementById('maz-von').value;
+  const bis = document.getElementById('maz-bis').value;
+  if(!von || !bis){ document.getElementById('maz-content').innerHTML = '<div class="empty"><div class="empty-ttl">Bitte Zeitraum wählen</div></div>'; return; }
+
+  const w = workers.find(x=>String(x.id)===String(maId));
+  const mZ = zeiten.filter(z=>String(z.maId)===String(maId) && z.datum>=von && z.datum<=bis)
+    .sort((a,b)=>a.datum.localeCompare(b.datum));
+
+  const arbeitsZ = mZ.filter(z=>!z.art||z.art==='arbeit');
+  const totalH = arbeitsZ.reduce((a,z)=>a+z.std,0);
+  const lohn = totalH * (w.lohn||0);
+
+  // Abwesenheiten
+  const abwZ = mZ.filter(z=>z.art&&z.art!=='arbeit');
+  const urlaubT = abwZ.filter(z=>z.art==='urlaub').length;
+  const krankT  = abwZ.filter(z=>z.art==='krank').length;
+  const feiertT = abwZ.filter(z=>z.art==='feiertag').length;
+  const unbezT  = abwZ.filter(z=>z.art==='urlaub-unbezahlt').length;
+
+  if(!mZ.length){
+    document.getElementById('maz-content').innerHTML = '<div class="empty"><div class="empty-ico">📅</div><div class="empty-ttl">Keine Einträge im gewählten Zeitraum</div></div>';
+    return;
+  }
+
+  const rows = mZ.map(z=>{
+    const p = projects.find(x=>String(x.id)===String(z.projId));
+    const artLabels = {urlaub:'🏖 Urlaub',feiertag:'🎉 Feiertag',krank:'🤒 Krank','urlaub-unbezahlt':'📋 Unbez. Urlaub'};
+    const isAbw = z.art && z.art!=='arbeit';
+    const baustelle = isAbw ? `<span style="color:var(--blue);font-weight:600">${artLabels[z.art]||z.art}</span>` : (p?p.name:'<span style="color:var(--t2)">–</span>');
+    const wLohn = w.lohn||0;
+    const kosten = (isAbw && z.art!=='urlaub-unbezahlt') ? z.std*wLohn : (!isAbw ? z.std*wLohn : 0);
+    return `<tr>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap">${fmt(z.datum)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border)">${baustelle}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-family:'Bebas Neue';font-size:16px;color:${isAbw?'var(--blue)':'var(--accent)'}">${z.std} h</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.zeit||'–'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.pause?z.pause+' Min':'–'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--green)">${wLohn&&kosten?num(kosten)+' €':'–'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.notiz||''}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('maz-content').innerHTML = `
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--card2);border-radius:8px">
+      <div><div style="font-size:11px;color:var(--t2)">Zeitraum</div><div style="font-weight:600;font-size:13px">${fmt(von)} – ${fmt(bis)}</div></div>
+      <div><div style="font-size:11px;color:var(--t2)">Arbeitsstunden</div><div style="font-family:'Bebas Neue';font-size:22px;color:var(--accent)">${totalH} h</div></div>
+      ${lohn?`<div><div style="font-size:11px;color:var(--t2)">Lohnkosten</div><div style="font-family:'Bebas Neue';font-size:22px;color:var(--green)">${num(lohn)} €</div></div>`:''}
+      ${urlaubT?`<div><div style="font-size:11px;color:var(--t2)">🏖 Urlaub</div><div style="font-weight:600">${urlaubT} Tage</div></div>`:''}
+      ${krankT?`<div><div style="font-size:11px;color:var(--t2)">🤒 Krank</div><div style="font-weight:600;color:var(--red)">${krankT} Tage</div></div>`:''}
+      ${feiertT?`<div><div style="font-size:11px;color:var(--t2)">🎉 Feiertag</div><div style="font-weight:600">${feiertT} Tage</div></div>`:''}
+      ${unbezT?`<div><div style="font-size:11px;color:var(--t2)">📋 Unbez.</div><div style="font-weight:600">${unbezT} Tage</div></div>`:''}
+      <div><div style="font-size:11px;color:var(--t2)">Einträge</div><div style="font-weight:600">${mZ.length}</div></div>
+    </div>
+    <div style="overflow:auto;max-height:50vh;border:1px solid var(--border);border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead style="background:var(--card2);position:sticky;top:0">
+          <tr>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Datum</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Baustelle / Art</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Std.</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Zeit</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Pause</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Lohnkosten</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Notiz</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function exportMaZeitraumExcel(maId){
+  const w = workers.find(x=>String(x.id)===String(maId));
+  const von = document.getElementById('maz-von').value;
+  const bis = document.getElementById('maz-bis').value;
+  if(!w || !von || !bis){ toast('Daten fehlen','var(--orange)'); return; }
+
+  const mZ = zeiten.filter(z=>String(z.maId)===String(maId) && z.datum>=von && z.datum<=bis)
+    .sort((a,b)=>a.datum.localeCompare(b.datum));
+  if(!mZ.length){ toast('Keine Daten zum Exportieren','var(--orange)'); return; }
+
+  const artLabels = {urlaub:'Urlaub',feiertag:'Feiertag',krank:'Krank','urlaub-unbezahlt':'Unbez. Urlaub',arbeit:''};
+  const ws_data = [
+    ['Mitarbeiter-Zeitraumauswertung'],
+    ['Mitarbeiter:', w.vorname+' '+w.nachname],
+    ['Zeitraum:', fmt(von)+' bis '+fmt(bis)],
+    ['Rolle:', w.rolle||''],
+    ['Stundensatz:', w.lohn?w.lohn+' €/h':''],
+    [],
+    ['Datum','Baustelle / Art','Stunden','Zeit','Pause (Min)','Stundensatz (€)','Lohnkosten (€)','Notiz']
+  ];
+
+  let totalH = 0, totalK = 0;
+  mZ.forEach(z=>{
+    const p = projects.find(x=>String(x.id)===String(z.projId));
+    const isAbw = z.art && z.art!=='arbeit';
+    const baustelle = isAbw ? (artLabels[z.art]||z.art) : (p?p.name:'Unbekannt');
+    const wLohn = w.lohn||0;
+    const kosten = z.std*wLohn;
+    if(!isAbw || z.art!=='urlaub-unbezahlt'){
+      totalH += z.std;
+      totalK += kosten;
+    }
+    ws_data.push([
+      z.datum, baustelle, z.std, z.zeit||'', z.pause||0, wLohn, kosten, z.notiz||''
+    ]);
+  });
+
+  ws_data.push([]);
+  ws_data.push(['','GESAMT', totalH, '', '', '', totalK, '']);
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(ws_data);
+  ws['!cols'] = [{wch:12},{wch:28},{wch:9},{wch:14},{wch:11},{wch:14},{wch:14},{wch:30}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Auswertung');
+  const filename = `Stunden_${w.vorname}_${w.nachname}_${von}_bis_${bis}.xlsx`;
+  XLSX.writeFile(wb, filename);
+  toast('📊 Excel exportiert');
+}
+
 function exportProjAuswertungExcel(projId){
   const p = projects.find(x=>String(x.id)===String(projId));
   const month = document.getElementById('rep-month').value;
@@ -3780,7 +3972,7 @@ function renderReport(){
     const krankTage=wAbw.filter(z=>z.art==='krank').length;
     const feiertagTage=wAbw.filter(z=>z.art==='feiertag').length;
     const unbezTage=wAbw.filter(z=>z.art==='urlaub-unbezahlt').length;
-    return`<div class="rep-card">
+    return`<div class="rep-card" onclick="openMaZeitraumAuswertung('${w.id}')" style="cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
       <div class="rep-ch"><div class="ma-av ${cls}" style="width:36px;height:36px;font-size:15px">${ini}</div>
         <div><div style="font-weight:600">${w.vorname} ${w.nachname}</div><div style="font-size:12px;color:var(--t2)">${w.rolle||'Mitarbeiter'}</div></div>
       </div>
@@ -3807,6 +3999,7 @@ function renderReport(){
             </div>`;
           }).join('')}
         </div>`:'' }
+        <div style="text-align:center;margin-top:10px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--accent)">→ Klicken für Zeitraum-Auswertung</div>
       </div>
     </div>`;
   }).filter(Boolean);
