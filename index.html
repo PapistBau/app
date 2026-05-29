@@ -3608,6 +3608,138 @@ function setRepProjFilter(filter){
   renderReport();
 }
 
+// Projekt-Auswertung Detail mit Excel-Export
+function openProjAuswertung(projId){
+  const p = projects.find(x=>String(x.id)===String(projId));
+  if(!p && projId!=='null') { toast('Projekt nicht gefunden','var(--orange)'); return; }
+
+  const month = document.getElementById('rep-month').value;
+  const mZ = repAllMonths ? zeiten : zeiten.filter(z=>z.datum.startsWith(month));
+  const projZ = mZ.filter(z=>String(z.projId)===String(projId) && (!z.art||z.art==='arbeit'))
+    .sort((a,b)=>a.datum.localeCompare(b.datum));
+
+  if(!projZ.length){ toast('Keine Stunden für dieses Projekt','var(--orange)'); return; }
+
+  // Daten nach Datum gruppieren
+  const byDate = {};
+  projZ.forEach(z=>{
+    if(!byDate[z.datum]) byDate[z.datum]=[];
+    byDate[z.datum].push(z);
+  });
+
+  const totalH = projZ.reduce((a,z)=>a+z.std,0);
+  const lohn = projZ.reduce((a,z)=>{ const w=workers.find(x=>String(x.id)===String(z.maId)); return a+z.std*(w?.lohn||0);},0);
+  const periodLabel = repAllMonths ? 'Gesamter Zeitraum' : month;
+
+  const rows = Object.entries(byDate).sort((a,b)=>a[0].localeCompare(b[0])).map(([datum, entries])=>{
+    return entries.map(z=>{
+      const w = workers.find(x=>String(x.id)===String(z.maId));
+      const wLohn = w?.lohn || 0;
+      const kosten = z.std * wLohn;
+      return `<tr>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap">${fmt(z.datum)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--border)">${w?w.vorname+' '+w.nachname:'Unbekannt'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-family:'Bebas Neue';font-size:16px;color:var(--accent)">${z.std} h</td>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.zeit||'–'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.pause?z.pause+' Min':'–'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--green)">${wLohn?num(kosten)+' €':'–'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.notiz||''}</td>
+      </tr>`;
+    }).join('');
+  }).join('');
+
+  // Modal anzeigen
+  let modal = document.getElementById('modal-proj-ausw');
+  if(!modal){
+    modal = document.createElement('div');
+    modal.id = 'modal-proj-ausw';
+    modal.className = 'overlay';
+    modal.style.display='none';
+    modal.onclick = (e)=>{ if(e.target===modal) closeModal('modal-proj-ausw'); };
+    document.body.appendChild(modal);
+  }
+
+  modal.innerHTML = `<div class="modal" style="max-width:1000px;width:95%;max-height:90vh;overflow:auto">
+    <div class="mttl">📊 Stundenauswertung — ${p?p.name:'Unbekannt'}</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--card2);border-radius:8px">
+      <div><div style="font-size:11px;color:var(--t2)">Zeitraum</div><div style="font-weight:600">${periodLabel}</div></div>
+      <div><div style="font-size:11px;color:var(--t2)">Stunden gesamt</div><div style="font-family:'Bebas Neue';font-size:22px;color:var(--accent)">${totalH} h</div></div>
+      ${lohn?`<div><div style="font-size:11px;color:var(--t2)">Lohnkosten</div><div style="font-family:'Bebas Neue';font-size:22px;color:var(--green)">${num(lohn)} €</div></div>`:''}
+      <div><div style="font-size:11px;color:var(--t2)">Einträge</div><div style="font-weight:600">${projZ.length}</div></div>
+    </div>
+    <div style="overflow:auto;max-height:55vh;border:1px solid var(--border);border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead style="background:var(--card2);position:sticky;top:0">
+          <tr>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Datum</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Mitarbeiter</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Std.</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Zeit</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Pause</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Lohnkosten</th>
+            <th style="padding:10px;text-align:left;font-size:11px;text-transform:uppercase;color:var(--t2);font-weight:700;letter-spacing:.5px">Notiz</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="mfooter">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-proj-ausw')">Schließen</button>
+      <button class="btn btn-green btn-sm" onclick="exportProjAuswertungExcel('${projId}')">📊 Excel Export</button>
+    </div>
+  </div>`;
+  modal.style.display='flex';
+}
+
+function exportProjAuswertungExcel(projId){
+  const p = projects.find(x=>String(x.id)===String(projId));
+  const month = document.getElementById('rep-month').value;
+  const mZ = repAllMonths ? zeiten : zeiten.filter(z=>z.datum.startsWith(month));
+  const projZ = mZ.filter(z=>String(z.projId)===String(projId) && (!z.art||z.art==='arbeit'))
+    .sort((a,b)=>a.datum.localeCompare(b.datum));
+
+  if(!projZ.length){ toast('Keine Daten zum Exportieren','var(--orange)'); return; }
+
+  const ws_data = [
+    ['Stundenauswertung'],
+    ['Projekt:', p?p.name:'Unbekannt'],
+    ['Zeitraum:', repAllMonths?'Gesamt':month],
+    ['Kunde:', p?.kunde||''],
+    [],
+    ['Datum','Mitarbeiter','Stunden','Zeit','Pause (Min)','Stundensatz (€)','Lohnkosten (€)','Notiz']
+  ];
+
+  let totalH = 0, totalK = 0;
+  projZ.forEach(z=>{
+    const w = workers.find(x=>String(x.id)===String(z.maId));
+    const wLohn = w?.lohn || 0;
+    const kosten = z.std * wLohn;
+    totalH += z.std;
+    totalK += kosten;
+    ws_data.push([
+      z.datum,
+      w ? w.vorname+' '+w.nachname : 'Unbekannt',
+      z.std,
+      z.zeit||'',
+      z.pause||0,
+      wLohn,
+      kosten,
+      z.notiz||''
+    ]);
+  });
+
+  ws_data.push([]);
+  ws_data.push(['','GESAMT', totalH, '', '', '', totalK, '']);
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(ws_data);
+  ws['!cols'] = [{wch:12},{wch:22},{wch:9},{wch:14},{wch:11},{wch:14},{wch:14},{wch:30}];
+  XLSX.utils.book_append_sheet(wb, ws, 'Stundenauswertung');
+  const filename = `Stunden_${(p?p.name:'Projekt').replace(/[^a-zA-Z0-9äöüÄÖÜß ]/g,'').slice(0,40)}_${repAllMonths?'Gesamt':month}.xlsx`;
+  XLSX.writeFile(wb, filename);
+  toast('📊 Excel exportiert');
+}
+
 function setRepMonth(mode){
   repAllMonths = (mode==='all');
   renderReport();
@@ -3683,24 +3815,40 @@ function renderReport(){
     : '<div class="empty"><div class="empty-ico">👷</div><div class="empty-ttl">Keine Stunden in diesem Zeitraum</div></div>';
 
   // ── TAB 2: NACH PROJEKT ──
+  // ── TAB 2: NACH PROJEKT ──
   const byProj={};
   arbeitsZ.forEach(z=>{
-    if(!byProj[z.projId]) byProj[z.projId]={total:0,workers:{}};
+    if(!byProj[z.projId]) byProj[z.projId]={total:0,workers:{},zeiten:[]};
     byProj[z.projId].total+=z.std;
     byProj[z.projId].workers[z.maId]=(byProj[z.projId].workers[z.maId]||0)+z.std;
+    byProj[z.projId].zeiten.push(z);
   });
-  const sortedProj=Object.entries(byProj).sort((a,b)=>b[1].total-a[1].total);
 
-  document.getElementById('rep-proj-grid').innerHTML = sortedProj.length ? `
+  // Filter anwenden
+  const filteredProj = Object.entries(byProj).filter(([pid])=>{
+    if(repProjFilter==='alle') return true;
+    const p=projects.find(x=>String(x.id)===String(pid));
+    if(!p) return repProjFilter==='alle';
+    return p.typ===repProjFilter;
+  });
+  const sortedProj=filteredProj.sort((a,b)=>b[1].total-a[1].total);
+
+  document.getElementById('rep-proj-grid').innerHTML = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="fpill ${repProjFilter==='alle'?'active':''}" onclick="setRepProjFilter('alle')">Alle</button>
+      <button class="fpill ${repProjFilter==='laufend'?'active':''}" onclick="setRepProjFilter('laufend')">🔵 Laufend</button>
+      <button class="fpill ${repProjFilter==='abgeschlossen'?'active':''}" onclick="setRepProjFilter('abgeschlossen')">✅ Abgeschlossen</button>
+    </div>
+    ${sortedProj.length ? `
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">
     ${sortedProj.map(([pid,data])=>{
-      const p=projects.find(x=>x.id==pid);
+      const p=projects.find(x=>String(x.id)===String(pid));
       const sc=p?SC[p.typ]||SC.laufend:SC.laufend;
       const lohnKosten=Object.entries(data.workers).reduce((a,[wid,h])=>{
-        const w=workers.find(x=>x.id==wid); return a+h*(w?.lohn||0);
+        const w=workers.find(x=>String(x.id)===String(wid)); return a+h*(w?.lohn||0);
       },0);
       const sortedW=Object.entries(data.workers).sort((a,b)=>b[1]-a[1]);
-      return`<div class="rep-card">
+      return`<div class="rep-card" onclick="openProjAuswertung('${pid}')" style="cursor:pointer;transition:border-color .15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
         <div class="rep-ch" style="border-bottom:1px solid var(--border)">
           <span style="font-size:20px">${sc.ico}</span>
           <div style="flex:1;min-width:0">
@@ -3716,7 +3864,7 @@ function renderReport(){
           ${lohnKosten?`<div class="rep-row" style="margin-bottom:10px"><span class="rep-lbl">Lohnkosten</span><span class="rep-val" style="color:var(--green)">${num(lohnKosten)} €</span></div>`:''}
           <div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Mitarbeiter</div>
           ${sortedW.map(([wid,h])=>{
-            const w=workers.find(x=>x.id==wid);
+            const w=workers.find(x=>String(x.id)===String(wid));
             const wi=workers.indexOf(w);
             const ini=w?(w.vorname[0]+w.nachname[0]).toUpperCase():'?';
             const cls='av-'+(wi%6||0);
@@ -3734,10 +3882,12 @@ function renderReport(){
               </div>
             </div>`;
           }).join('')}
+          <div style="text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--accent)">→ Klicken für Tagesdetails</div>
         </div>
       </div>`;
     }).join('')}
-    </div>` : '<div class="empty"><div class="empty-ico">🏗</div><div class="empty-ttl">Keine Stunden in diesem Zeitraum</div></div>';
+    </div>` : '<div class="empty"><div class="empty-ico">🏗</div><div class="empty-ttl">Keine Stunden in diesem Zeitraum</div></div>'}
+  `;
 
   // ── TAB 3: GESAMT ──
   const byP2={};
