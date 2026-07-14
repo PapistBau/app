@@ -1666,7 +1666,7 @@ function goPage(id,el){
     const sel=document.getElementById('print-ma-select');
     const prev=sel.value;
     sel.innerHTML='<option value="">— Mitarbeiter wählen —</option>'+
-      workers.map(w=>`<option value="${w.id}">${w.vorname} ${w.nachname}${w.rolle?' · '+w.rolle:''}</option>`).join('');
+      workers.filter(w=>!w.archiviert).map(w=>`<option value="${w.id}">${w.vorname} ${w.nachname}${w.rolle?' · '+w.rolle:''}</option>`).join('');
     if(prev) sel.value=prev;
     renderPrintPreview();
   }
@@ -3271,12 +3271,16 @@ function delRechAndRefresh(rechId){
 function renderMA(){
   const g=document.getElementById('ma-grid');
   const em=document.getElementById('empty-ma');
-  if(!workers.length){g.innerHTML='';em.style.display='block';return;}
+  const aktive = workers.filter(w=>!w.archiviert);
+  const archivierte = workers.filter(w=>w.archiviert);
+
+  if(!aktive.length && !archivierte.length){g.innerHTML='';em.style.display='block';return;}
   em.style.display='none';
-  g.innerHTML=workers.map((w,i)=>{
+
+  let html = aktive.map((w,i)=>{
     const cls='av-'+(i%6);
     const ini=(w.vorname[0]+w.nachname[0]).toUpperCase();
-    const hrs=zeiten.filter(z=>z.maId===w.id).reduce((a,z)=>a+z.std,0);
+    const hrs=zeiten.filter(z=>String(z.maId)===String(w.id)).reduce((a,z)=>a+z.std,0);
     return`<div class="ma-card">
       <div class="ma-av ${cls}">${ini}</div>
       <div class="ma-info">
@@ -3286,10 +3290,38 @@ function renderMA(){
       </div>
       <div class="ma-acts">
         <button class="edit-btn" onclick="editMA(${w.id})">✏</button>
-        <button class="del-btn" onclick="delMA(${w.id})">🗑</button>
+        <button class="del-btn" onclick="delMA(${w.id})">📦</button>
       </div>
     </div>`;
   }).join('');
+
+  // Archivierte Sektion
+  if(archivierte.length){
+    html += `<div style="grid-column:1/-1;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="font-size:12px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px">📦 Archivierte Mitarbeiter (${archivierte.length})</div>
+      <div class="ma-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+        ${archivierte.map((w,i)=>{
+          const cls='av-'+(i%6);
+          const ini=(w.vorname[0]+w.nachname[0]).toUpperCase();
+          const hrs=zeiten.filter(z=>String(z.maId)===String(w.id)).reduce((a,z)=>a+z.std,0);
+          return`<div class="ma-card" style="opacity:.65">
+            <div class="ma-av ${cls}" style="filter:grayscale(.5)">${ini}</div>
+            <div class="ma-info">
+              <div class="ma-name">📦 ${w.vorname} ${w.nachname}</div>
+              <div class="ma-role">${w.rolle||'Mitarbeiter'}${w.lohn?' · '+w.lohn+' €/h':''}</div>
+              <div class="ma-h">${hrs}<small> Std. gesamt</small></div>
+            </div>
+            <div class="ma-acts">
+              <button class="btn btn-ghost btn-sm" onclick="unarchiveMA(${w.id})" title="Wiederherstellen">↩</button>
+              <button class="del-btn" onclick="wirklichLoeschenMA(${w.id})" title="Endgültig löschen">🗑</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  g.innerHTML = html;
 }
 
 function openMAModal(){
@@ -3387,7 +3419,7 @@ function openUmbuchenModal(){
   const sel = (id) => {
     const el = document.getElementById(id);
     el.innerHTML = '<option value="">— Mitarbeiter wählen —</option>' +
-      workers.map(w=>`<option value="${w.id}">${w.vorname} ${w.nachname} (${w.lohn||0} €/h)</option>`).join('');
+      workers.filter(w=>!w.archiviert).map(w=>`<option value="${w.id}">${w.vorname} ${w.nachname} (${w.lohn||0} €/h)</option>`).join('');
     el.onchange = updateUmbuchenInfo;
   };
   sel('umb-von'); sel('umb-zu');
@@ -3428,9 +3460,41 @@ function doUmbuchen(){
 function delMA(id){
   const w=workers.find(x=>x.id===id);
   confirmDelete(
-    'Mitarbeiter löschen?',
-    w?`${w.vorname} ${w.nachname} wird gelöscht. Bereits gebuchte Zeiten bleiben erhalten.`:'Dieser Mitarbeiter wird gelöscht.',
-    async ()=>{ await trackDeleted('workers', id); workers=workers.filter(x=>x.id!==id); saveAll();renderMA(); toast('🗑 Mitarbeiter gelöscht','var(--red)'); }
+    'Mitarbeiter archivieren?',
+    w?`${w.vorname} ${w.nachname} wird archiviert und ausgeblendet. Alle Stunden und Daten bleiben erhalten.`:'Dieser Mitarbeiter wird archiviert.',
+    async ()=>{
+      const i=workers.findIndex(x=>x.id===id);
+      if(i>-1){
+        workers[i].archiviert=true;
+        workers[i]._syncSession=SYNC_SESSION;
+      }
+      saveAll();renderMA();
+      toast('📦 Mitarbeiter archiviert','var(--t2)');
+    }
+  );
+}
+
+function unarchiveMA(id){
+  const i=workers.findIndex(x=>x.id===id);
+  if(i>-1){
+    workers[i].archiviert=false;
+    workers[i]._syncSession=SYNC_SESSION;
+    saveAll();renderMA();
+    toast('✅ Mitarbeiter wiederhergestellt');
+  }
+}
+
+function wirklichLoeschenMA(id){
+  const w=workers.find(x=>x.id===id);
+  confirmDelete(
+    'Endgültig löschen?',
+    w?`${w.vorname} ${w.nachname} wird permanent gelöscht. Bereits gebuchte Zeiten bleiben in der Datenbank.`:'Dieser Mitarbeiter wird permanent gelöscht.',
+    async ()=>{
+      await trackDeleted('workers', id);
+      workers=workers.filter(x=>x.id!==id);
+      saveAll();renderMA();
+      toast('🗑 Mitarbeiter gelöscht','var(--red)');
+    }
   );
 }
 
@@ -3460,7 +3524,7 @@ function openZeitModal(editId){
   editZeitId=editId||null;
   document.getElementById('zeit-mttl').textContent=editId?'Zeit bearbeiten':'Stunden buchen';
   const ms=document.getElementById('z-ma');
-  ms.innerHTML='<option value="">— Mitarbeiter wählen —</option>'+workers.map(w=>`<option value="${w.id}">${w.vorname} ${w.nachname}</option>`).join('');
+  ms.innerHTML='<option value="">— Mitarbeiter wählen —</option>'+workers.filter(w=>!w.archiviert).map(w=>`<option value="${w.id}">${w.vorname} ${w.nachname}</option>`).join('');
   const bs=document.getElementById('z-bs');
   bs.innerHTML='<option value="">— Projekt wählen —</option>'+projects.filter(p=>p.typ==='laufend'||p.typ==='abgeschlossen').map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
   if(editId){
@@ -5776,7 +5840,7 @@ function checkPin(){
     pinBuffer=''; updatePinDots(); return;
   }
 
-  const ma=workers.find(w=>w.pin&&w.pin===pinBuffer);
+  const ma=workers.find(w=>w.pin&&w.pin===pinBuffer&&!w.archiviert);
   if(ma){
     pinFehlversuche=0; // Reset bei Erfolg
     loginAsMitarbeiter(ma);
