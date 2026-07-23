@@ -1687,7 +1687,13 @@ function goPage(id,el){
 // ════════════════════════════════════
 const fmt=d=>{if(!d)return'';const[y,m,day]=d.split('-');return`${day}.${m}.${y}`;};
 const num=n=>Math.round(n).toLocaleString('de-DE');
-const today=()=>new Date().toISOString().split('T')[0];
+const today=()=>{
+  const d=new Date();
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+};
 function closeModal(id){document.getElementById(id).style.display='none';}
 function toast(msg,col='var(--green)'){
   const t=document.createElement('div');
@@ -3734,7 +3740,14 @@ function renderZeitList(){
 function getWeekDates(offset){
   const now=new Date();const day=now.getDay()||7;
   const mon=new Date(now);mon.setDate(now.getDate()-day+1+(offset*7));
-  return Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return d.toISOString().split('T')[0];});
+  return Array.from({length:7},(_,i)=>{
+    const d=new Date(mon);d.setDate(mon.getDate()+i);
+    // Lokales Datum ohne Zeitzone-Verschiebung (statt toISOString)
+    const y=d.getFullYear();
+    const m=String(d.getMonth()+1).padStart(2,'0');
+    const day2=String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day2}`;
+  });
 }
 function getKW(d){
   const x=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
@@ -3758,7 +3771,7 @@ function renderWeek(){
   const months=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
   const s=new Date(days[0]),e=new Date(days[6]);
   document.getElementById('week-lbl').textContent=`KW ${getKW(s)} · ${s.getDate()}. ${months[s.getMonth()]} – ${e.getDate()}. ${months[e.getMonth()]} ${e.getFullYear()}`;
-  document.getElementById('week-thead').innerHTML='<tr><th>Mitarbeiter</th>'+days.map((d,i)=>{const dt=new Date(d);return`<th style="${d===today()?'color:var(--accent)':''}">${names[i]}<br><span style="font-weight:400;font-size:10px">${dt.getDate()}.${dt.getMonth()+1}.</span></th>`;}).join('')+'<th>Σ</th></tr>';
+  document.getElementById('week-thead').innerHTML='<tr><th>Mitarbeiter</th>'+days.map((d,i)=>{const parts=d.split('-');const dt=new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2]));return`<th style="${d===today()?'color:var(--accent)':''}">${names[i]}<br><span style="font-weight:400;font-size:10px">${dt.getDate()}.${dt.getMonth()+1}.</span></th>`;}).join('')+'<th>Σ</th></tr>';
 
   // Gruppen-Dropdown aktualisieren
   const gruppen = [...new Set(workers.map(w=>w.gruppe).filter(Boolean))].sort();
