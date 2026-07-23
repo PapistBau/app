@@ -1774,11 +1774,16 @@ function renderProjList(id){
 }
 
 function filterProj(id,q){
-  q=q.toLowerCase();
-  let data=getProjData(id);
-  if(id==='angebote'&&angFilter!=='alle') data=data.filter(p=>p.typ===angFilter);
-  if(q) data=data.filter(p=>(p.name+p.kunde+p.ort).toLowerCase().includes(q));
-  renderProjCards(id,data);
+  q=(q||'').toLowerCase();
+  // Alias-Mapping: HTML nutzt teilweise 'angebot' und 'anfrage' statt 'angebote' und 'anfragen'
+  const dataId = id==='angebot' ? 'angebote' : (id==='anfrage' ? 'anfragen' : id);
+  let data=getProjData(dataId);
+  if(dataId==='angebote'&&angFilter!=='alle') data=data.filter(p=>p.typ===angFilter);
+  if(q) data=data.filter(p=>{
+    const suchtext = ((p.name||'')+' '+(p.kunde||'')+' '+(p.ort||'')+' '+(p.notes||'')).toLowerCase();
+    return suchtext.includes(q);
+  });
+  renderProjCards(dataId,data);
 }
 
 function setAngFilter(val,btn){
