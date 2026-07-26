@@ -1714,14 +1714,16 @@ function updateBadges(){
 // ════════════════════════════════════
 function renderDashboard(){
   updateBadges();
-  const lauf=projects.filter(p=>p.typ==='laufend');
-  const done=projects.filter(p=>p.typ==='abgeschlossen');
-  const angErstellt=projects.filter(p=>p.typ==='angebot');
-  const angOffen=projects.filter(p=>p.typ==='angebot-offen');
-  const anf=projects.filter(p=>p.typ==='anfrage');
+  const aktiv = p => !p.archiviert;
+  const lauf=projects.filter(p=>p.typ==='laufend' && aktiv(p));
+  const done=projects.filter(p=>p.typ==='abgeschlossen' && aktiv(p));
+  const angErstellt=projects.filter(p=>p.typ==='angebot' && aktiv(p));
+  const angOffen=projects.filter(p=>p.typ==='angebot-offen' && aktiv(p));
+  const anf=projects.filter(p=>p.typ==='anfrage' && aktiv(p));
   const h=zeiten.reduce((a,z)=>a+z.std,0);
   const rechBez=rechnungen.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
   const rechOff=rechnungen.filter(r=>r.status!=='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
+  const aktiveMA=workers.filter(w=>!w.archiviert);
 
   document.getElementById('dash-stats').innerHTML=`
     <div class="stat s-blue"><div class="stat-ico">🔵</div><div class="stat-val">${lauf.length}</div><div class="stat-lbl">Laufende Projekte</div></div>
@@ -1732,7 +1734,7 @@ function renderDashboard(){
     <div class="stat s-green"><div class="stat-ico">🧾</div><div class="stat-val">${num(rechBez)} €</div><div class="stat-lbl">Rechnungen bezahlt</div></div>
     <div class="stat s-orange"><div class="stat-ico">⏳</div><div class="stat-val">${num(rechOff)} €</div><div class="stat-lbl">Rechnungen offen</div></div>
     <div class="stat s-orange"><div class="stat-ico">⏱</div><div class="stat-val">${h}</div><div class="stat-lbl">Std. erfasst</div></div>
-    <div class="stat s-red"><div class="stat-ico">👷</div><div class="stat-val">${workers.length}</div><div class="stat-lbl">Mitarbeiter</div></div>
+    <div class="stat s-red"><div class="stat-ico">👷</div><div class="stat-val">${aktiveMA.length}</div><div class="stat-lbl">Mitarbeiter</div></div>
   `;
 
   // Gruppierte Ansicht mit Überschriften
