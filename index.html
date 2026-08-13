@@ -686,6 +686,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   <div class="nsec">Angebote & Anfragen</div>
   <div class="ni" data-page="angebote"><span class="nico">📄</span>Angebote<span class="nbadge" id="nb-angebot" style="display:none"></span></div>
   <div class="ni" data-page="anfragen"><span class="nico">📬</span>Anfragen<span class="nbadge" id="nb-anfrage" style="display:none"></span></div>
+  <div class="ni" data-page="bauplan"><span class="nico">📅</span>Bauplan</div>
   <div class="ni" data-page="archiv"><span class="nico">📦</span>Archiv</div>
   <hr class="ndiv">
   <div class="nsec">Rechnungen</div>
@@ -768,6 +769,29 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 </div>
 
 <!-- ARCHIV -->
+<!-- BAUSTELLEN-ZEITPLAN -->
+<div class="page" id="page-bauplan">
+  <div class="ph">
+    <div><div class="ph-title">Baustellen-Zeitplan</div><div class="ph-sub">Übersicht aller Baustellen mit Zeitstrahl</div></div>
+  </div>
+  <div class="fbar" style="margin-bottom:14px">
+    <button class="week-btn" onclick="changeBauplanScroll(-1)">◀</button>
+    <div id="bauplan-lbl" style="font-family:'Bebas Neue';font-size:16px;color:var(--accent);min-width:180px;text-align:center"></div>
+    <button class="week-btn" onclick="changeBauplanScroll(1)">▶</button>
+    <button class="btn btn-ghost btn-sm" onclick="bauplanScroll=0;renderBauplan()">Heute</button>
+    <select id="bauplan-zoom" onchange="renderBauplan()" style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--text);font-size:13px">
+      <option value="month">Monat</option>
+      <option value="quarter">Quartal (3 Monate)</option>
+      <option value="halfyear">Halbjahr</option>
+      <option value="year">Jahr</option>
+    </select>
+    <button class="fpill active" id="bp-filt-lauf" onclick="setBauplanFilter('laufend')">🔵 Laufend</button>
+    <button class="fpill" id="bp-filt-ang" onclick="setBauplanFilter('angebot')">📄 Angebote</button>
+    <button class="fpill" id="bp-filt-all" onclick="setBauplanFilter('alle')">Alle</button>
+  </div>
+  <div id="bauplan-content" style="overflow-x:auto;background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:12px"></div>
+</div>
+
 <div class="page" id="page-archiv">
   <div class="ph">
     <div><div class="ph-title">Archiv</div><div class="ph-sub">Archivierte Projekte — Daten bleiben erhalten</div></div>
@@ -1110,6 +1134,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div class="bni" data-page="abgeschlossen"><span class="nico">✅</span>Abgeschlossen</div>
     <div class="bni" data-page="angebote"><span class="nico">📋</span>Angebote</div>
     <div class="bni" data-page="anfragen"><span class="nico">💬</span>Anfragen</div>
+    <div class="bni" data-page="bauplan"><span class="nico">📅</span>Bauplan</div>
     <div class="bni" data-page="archiv"><span class="nico">📦</span>Archiv</div>
     <div class="bni" data-page="rechnungen"><span class="nico">🧾</span>Rechnungen</div>
     <div class="bni" data-page="rech-projekt"><span class="nico">🏗</span>Rg./Projekt</div>
@@ -1659,6 +1684,7 @@ function goPage(id,el){
   if(id==='angebote') renderProjList('angebote');
   if(id==='anfragen') renderProjList('anfragen');
   if(id==='archiv') renderProjList('archiv');
+  if(id==='bauplan') renderBauplan();
   if(id==='controlling'){ initCtrlYear(); renderControlling(); }
   if(id==='material'){ renderMaterial(); }
   if(id==='allg-todos') renderAllgTodos();
@@ -3758,6 +3784,137 @@ function getKW(d){
   return Math.ceil((((x-y)/86400000)+1)/7);
 }
 function changeWeek(d){currentWeekOffset+=d;renderWeek();}
+
+// ════════════════════════════════════
+// BAUSTELLEN-ZEITPLAN (GANTT)
+// ════════════════════════════════════
+let bauplanScroll = 0;
+let bauplanFilter = 'laufend';
+
+function setBauplanFilter(f){
+  bauplanFilter = f;
+  ['lauf','ang','all'].forEach(k=>{
+    const el = document.getElementById('bp-filt-'+k);
+    if(el) el.classList.remove('active');
+  });
+  const map = {laufend:'lauf', angebot:'ang', alle:'all'};
+  const el = document.getElementById('bp-filt-'+map[f]);
+  if(el) el.classList.add('active');
+  renderBauplan();
+}
+
+function changeBauplanScroll(d){ bauplanScroll += d; renderBauplan(); }
+
+function renderBauplan(){
+  const zoom = document.getElementById('bauplan-zoom')?.value || 'month';
+  const zoomMonths = {month:1, quarter:3, halfyear:6, year:12}[zoom];
+
+  const heute = new Date();
+  const start = new Date(heute.getFullYear(), heute.getMonth()+bauplanScroll, 1);
+  const end = new Date(start.getFullYear(), start.getMonth()+zoomMonths, 0);
+
+  // Label
+  const monate = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+  const lbl = zoomMonths===1
+    ? `${monate[start.getMonth()]} ${start.getFullYear()}`
+    : `${monate[start.getMonth()]} ${start.getFullYear()} – ${monate[end.getMonth()]} ${end.getFullYear()}`;
+  document.getElementById('bauplan-lbl').textContent = lbl;
+
+  // Projekte filtern
+  let projs = projects.filter(p=>!p.archiviert);
+  if(bauplanFilter==='laufend') projs = projs.filter(p=>p.typ==='laufend');
+  else if(bauplanFilter==='angebot') projs = projs.filter(p=>p.typ==='angebot'||p.typ==='angebot-offen');
+
+  // Nur Projekte mit Start UND Ende
+  projs = projs.filter(p=>p.start && p.ende);
+
+  if(!projs.length){
+    document.getElementById('bauplan-content').innerHTML = `<div class="empty" style="padding:40px"><div class="empty-ico">📅</div><div class="empty-ttl">Keine Baustellen mit Datum</div><div class="empty-sub">Trage bei einem Projekt Start und Ende ein damit es hier erscheint</div></div>`;
+    return;
+  }
+
+  // Gesamter Zeitraum in Tagen
+  const msPerDay = 24*60*60*1000;
+  const totalDays = Math.round((end - start)/msPerDay) + 1;
+
+  // Header-Spalten (Monate oder Wochen je nach Zoom)
+  let headerCells = '';
+  if(zoomMonths<=1){
+    // Wöchentliche Marker
+    for(let d=new Date(start); d<=end; d.setDate(d.getDate()+7)){
+      const dayNum = Math.round((d-start)/msPerDay);
+      const pctLeft = (dayNum/totalDays)*100;
+      headerCells += `<div style="position:absolute;left:${pctLeft}%;top:0;bottom:0;border-left:1px solid var(--border);padding-left:6px;font-size:10px;color:var(--t2);white-space:nowrap">KW ${getKW(new Date(d))}</div>`;
+    }
+  } else {
+    // Monats-Marker
+    for(let m=new Date(start); m<=end; m.setMonth(m.getMonth()+1)){
+      const dayNum = Math.round((m-start)/msPerDay);
+      const pctLeft = (dayNum/totalDays)*100;
+      headerCells += `<div style="position:absolute;left:${pctLeft}%;top:0;bottom:0;border-left:1px solid var(--border);padding-left:6px;font-size:11px;color:var(--t2);font-weight:600;white-space:nowrap">${monate[m.getMonth()]} ${m.getFullYear()}</div>`;
+    }
+  }
+
+  // Heute-Linie
+  const heuteTag = Math.round((heute - start)/msPerDay);
+  let heuteMarker = '';
+  if(heuteTag>=0 && heuteTag<=totalDays){
+    const heutePct = (heuteTag/totalDays)*100;
+    heuteMarker = `<div style="position:absolute;left:${heutePct}%;top:0;bottom:0;width:2px;background:var(--red);z-index:5;pointer-events:none" title="Heute"></div>`;
+  }
+
+  // Nach Startdatum sortieren
+  projs.sort((a,b)=>a.start.localeCompare(b.start));
+
+  // Zeilen bauen
+  const rows = projs.map(p=>{
+    const pStart = new Date(p.start);
+    const pEnde = new Date(p.ende);
+    // Clip auf sichtbaren Bereich
+    const clipStart = pStart<start ? start : pStart;
+    const clipEnd = pEnde>end ? end : pEnde;
+    if(clipEnd<start || clipStart>end) return ''; // außerhalb
+
+    const startTag = Math.round((clipStart-start)/msPerDay);
+    const dauerTage = Math.round((clipEnd-clipStart)/msPerDay) + 1;
+    const pctLeft = (startTag/totalDays)*100;
+    const pctBreite = Math.max((dauerTage/totalDays)*100, 1.5);
+
+    const s = SC[p.typ] || SC.laufend;
+    const pr = parseInt(p.prog)||0;
+    const isAng = p.typ==='angebot' || p.typ==='angebot-offen';
+
+    return `
+      <div style="display:flex;align-items:center;border-bottom:1px solid rgba(48,54,61,.3);min-height:44px">
+        <div style="width:220px;flex-shrink:0;padding:8px 12px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" onclick="openDetail(${p.id})" title="${p.name}">
+          <span style="color:${s.col};font-weight:700">${s.ico}</span> ${p.name}
+        </div>
+        <div style="flex:1;position:relative;height:44px">
+          <div style="position:absolute;left:${pctLeft}%;width:${pctBreite}%;top:8px;bottom:8px;background:${s.col};border-radius:6px;display:flex;align-items:center;padding:0 8px;color:#fff;font-size:11px;font-weight:600;overflow:hidden;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3);${isAng?'opacity:.7;border:1px dashed rgba(255,255,255,.5)':''}" onclick="openDetail(${p.id})" title="${p.name} · ${fmt(p.start)} – ${fmt(p.ende)}${p.kunde?' · '+p.kunde:''}">
+            ${pr>0 && !isAng ? `<div style="position:absolute;left:0;top:0;bottom:0;width:${pr}%;background:rgba(255,255,255,.25);border-radius:6px"></div>`:''}
+            <span style="position:relative;z-index:2;white-space:nowrap;text-overflow:ellipsis;overflow:hidden">${p.name} ${pr>0?'· '+pr+'%':''}</span>
+          </div>
+        </div>
+      </div>`;
+  }).filter(Boolean).join('');
+
+  document.getElementById('bauplan-content').innerHTML = `
+    <div style="display:flex;border-bottom:2px solid var(--border);margin-bottom:6px;min-height:28px;position:relative">
+      <div style="width:220px;flex-shrink:0;padding:6px 12px;font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px">Baustelle</div>
+      <div style="flex:1;position:relative;height:28px">${headerCells}${heuteMarker}</div>
+    </div>
+    <div style="position:relative">
+      ${rows || '<div class="empty" style="padding:40px"><div class="empty-ico">📅</div><div class="empty-ttl">Keine Baustellen im Zeitraum</div></div>'}
+      <div style="position:absolute;left:220px;right:0;top:0;bottom:0;pointer-events:none">${heuteMarker}</div>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--t2)">
+      <span><span style="display:inline-block;width:14px;height:10px;background:var(--red);vertical-align:middle;margin-right:4px"></span>Heute</span>
+      <span><span style="display:inline-block;width:14px;height:10px;background:var(--blue);vertical-align:middle;margin-right:4px;border-radius:2px"></span>Laufend</span>
+      <span><span style="display:inline-block;width:14px;height:10px;background:var(--accent);vertical-align:middle;margin-right:4px;border-radius:2px;opacity:.7;border:1px dashed #fff"></span>Angebot</span>
+      <span>Klick auf Baustelle → Details</span>
+    </div>
+  `;
+}
 let wocheFilter = 'aktiv';
 
 function setWocheFilter(mode){
