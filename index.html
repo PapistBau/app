@@ -1555,7 +1555,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     </div>
     <div class="fg"><label class="fl">Fällig bis</label><input type="date" class="fi" id="at-due"></div>
   </div>
-  <div class="fg"><label class="fl">Notiz</label><input class="fi" id="at-notiz" placeholder="Optional …"></div>
+  <div class="fg"><label class="fl">Notiz</label><textarea class="fi" id="at-notiz" placeholder="Optional – hier kannst du längere Notizen schreiben, mehrere Zeilen sind möglich" rows="4" style="resize:vertical;font-family:inherit;line-height:1.5;min-height:80px"></textarea></div>
   <div class="mfooter">
     <button class="btn btn-ghost" onclick="closeModal('modal-allgtodo')">Abbrechen</button>
     <button class="btn btn-primary" onclick="saveAllgTodo()">💾 Speichern</button>
@@ -5589,8 +5589,8 @@ function renderAllgTodos(){
           <div class="allgtodo-sub">
             <span>${prioIco[t.prio]||''} ${t.prio}</span>
             ${t.due?`<span class="allgtodo-due ${overdue?'overdue':''}">${overdue?'⚠ Überfällig: ':'📅 '}${fmt(t.due)}</span>`:''}
-            ${t.notiz?`<span style="color:var(--t2)">💬 ${t.notiz}</span>`:''}
           </div>
+          ${t.notiz?`<div style="margin-top:8px;padding:8px 10px;background:var(--card2);border-left:3px solid ${k.color};border-radius:0 6px 6px 0;font-size:12px;color:var(--t2);line-height:1.5;white-space:pre-wrap">${t.notiz}</div>`:''}
         </div>
         <div style="display:flex;gap:5px;flex-shrink:0">
           <button class="edit-btn" onclick="openAllgTodoModal(${k.id},${t.id})">✏</button>
