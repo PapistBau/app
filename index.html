@@ -3981,42 +3981,15 @@ function openProjAuswertung(projId){
   const p = projects.find(x=>String(x.id)===String(projId));
   if(!p && projId!=='null') { toast('Projekt nicht gefunden','var(--orange)'); return; }
 
-  const month = document.getElementById('rep-month').value;
-  const mZ = repAllMonths ? zeiten : zeiten.filter(z=>z.datum.startsWith(month));
-  const projZ = mZ.filter(z=>String(z.projId)===String(projId) && (!z.art||z.art==='arbeit'))
-    .sort((a,b)=>a.datum.localeCompare(b.datum));
+  // Standardzeitraum: Gesamter Zeitraum
+  const allProjZ = zeiten.filter(z=>String(z.projId)===String(projId) && (!z.art||z.art==='arbeit'));
+  if(!allProjZ.length){ toast('Keine Stunden für dieses Projekt','var(--orange)'); return; }
 
-  if(!projZ.length){ toast('Keine Stunden für dieses Projekt','var(--orange)'); return; }
+  // Von/bis aus Buchungen berechnen
+  const alleDaten = allProjZ.map(z=>z.datum).sort();
+  const minDatum = alleDaten[0];
+  const maxDatum = alleDaten[alleDaten.length-1];
 
-  // Daten nach Datum gruppieren
-  const byDate = {};
-  projZ.forEach(z=>{
-    if(!byDate[z.datum]) byDate[z.datum]=[];
-    byDate[z.datum].push(z);
-  });
-
-  const totalH = projZ.reduce((a,z)=>a+z.std,0);
-  const lohn = projZ.reduce((a,z)=>{ const w=workers.find(x=>String(x.id)===String(z.maId)); return a+z.std*(w?.lohn||0);},0);
-  const periodLabel = repAllMonths ? 'Gesamter Zeitraum' : month;
-
-  const rows = Object.entries(byDate).sort((a,b)=>a[0].localeCompare(b[0])).map(([datum, entries])=>{
-    return entries.map(z=>{
-      const w = workers.find(x=>String(x.id)===String(z.maId));
-      const wLohn = w?.lohn || 0;
-      const kosten = z.std * wLohn;
-      return `<tr>
-        <td style="padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap">${fmt(z.datum)}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid var(--border)">${w?w.vorname+' '+w.nachname:'Unbekannt'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-family:'Bebas Neue';font-size:16px;color:var(--accent)">${z.std} h</td>
-        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.zeit||'–'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.pause?z.pause+' Min':'–'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--green)">${wLohn?num(kosten)+' €':'–'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.notiz||''}</td>
-      </tr>`;
-    }).join('');
-  }).join('');
-
-  // Modal anzeigen
   let modal = document.getElementById('modal-proj-ausw');
   if(!modal){
     modal = document.createElement('div');
@@ -4029,13 +4002,103 @@ function openProjAuswertung(projId){
 
   modal.innerHTML = `<div class="modal" style="max-width:1000px;width:95%;max-height:90vh;overflow:auto">
     <div class="mttl">📊 Stundenauswertung — ${p?p.name:'Unbekannt'}</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;align-items:end">
+      <div>
+        <label class="fl">Von</label>
+        <input type="date" class="fi" id="paw-von" value="${minDatum}" onchange="renderProjAuswertung('${projId}')">
+      </div>
+      <div>
+        <label class="fl">Bis</label>
+        <input type="date" class="fi" id="paw-bis" value="${maxDatum}" onchange="renderProjAuswertung('${projId}')">
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="fpill active" onclick="setProjZeitraum('${projId}','gesamt', this)">Gesamt</button>
+        <button class="fpill" onclick="setProjZeitraum('${projId}','aktMonat', this)">Aktueller Monat</button>
+        <button class="fpill" onclick="setProjZeitraum('${projId}','vorMonat', this)">Vormonat</button>
+        <button class="fpill" onclick="setProjZeitraum('${projId}','aktJahr', this)">Dieses Jahr</button>
+      </div>
+    </div>
+    <div id="paw-content"></div>
+    <div class="mfooter">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-proj-ausw')">Schließen</button>
+      <button class="btn btn-green btn-sm" onclick="exportProjAuswertungExcel('${projId}')">📊 Excel Export</button>
+    </div>
+  </div>`;
+  modal.style.display='flex';
+  renderProjAuswertung(projId);
+}
+
+function setProjZeitraum(projId, preset, btn){
+  // Buttons stylen
+  btn.closest('div').querySelectorAll('.fpill').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const heute = new Date();
+  let von, bis;
+  if(preset==='gesamt'){
+    const allProjZ = zeiten.filter(z=>String(z.projId)===String(projId) && (!z.art||z.art==='arbeit'));
+    const alleDaten = allProjZ.map(z=>z.datum).sort();
+    von = alleDaten[0] || today();
+    bis = alleDaten[alleDaten.length-1] || today();
+  } else if(preset==='aktMonat'){
+    von = new Date(heute.getFullYear(), heute.getMonth(), 1).toISOString().slice(0,10);
+    bis = today();
+  } else if(preset==='vorMonat'){
+    von = new Date(heute.getFullYear(), heute.getMonth()-1, 1).toISOString().slice(0,10);
+    bis = new Date(heute.getFullYear(), heute.getMonth(), 0).toISOString().slice(0,10);
+  } else if(preset==='aktJahr'){
+    von = new Date(heute.getFullYear(), 0, 1).toISOString().slice(0,10);
+    bis = today();
+  }
+  document.getElementById('paw-von').value = von;
+  document.getElementById('paw-bis').value = bis;
+  renderProjAuswertung(projId);
+}
+
+function renderProjAuswertung(projId){
+  const p = projects.find(x=>String(x.id)===String(projId));
+  const von = document.getElementById('paw-von').value;
+  const bis = document.getElementById('paw-bis').value;
+  if(!von || !bis){ document.getElementById('paw-content').innerHTML = '<div class="empty"><div class="empty-ttl">Bitte Zeitraum wählen</div></div>'; return; }
+
+  const projZ = zeiten.filter(z=>
+    String(z.projId)===String(projId) &&
+    (!z.art||z.art==='arbeit') &&
+    z.datum>=von && z.datum<=bis
+  ).sort((a,b)=>a.datum.localeCompare(b.datum));
+
+  const totalH = projZ.reduce((a,z)=>a+z.std,0);
+  const lohn = projZ.reduce((a,z)=>{ const w=workers.find(x=>String(x.id)===String(z.maId)); return a+z.std*(w?.lohn||0);},0);
+  const periodLabel = `${fmt(von)} – ${fmt(bis)}`;
+
+  if(!projZ.length){
+    document.getElementById('paw-content').innerHTML = '<div class="empty"><div class="empty-ico">📅</div><div class="empty-ttl">Keine Einträge im gewählten Zeitraum</div></div>';
+    return;
+  }
+
+  const rows = projZ.map(z=>{
+    const w = workers.find(x=>String(x.id)===String(z.maId));
+    const wLohn = w?.lohn || 0;
+    const kosten = z.std * wLohn;
+    return `<tr>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap">${fmt(z.datum)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border)">${w?w.vorname+' '+w.nachname:'Unbekannt'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-family:'Bebas Neue';font-size:16px;color:var(--accent)">${z.std} h</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.zeit||'–'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.pause?z.pause+' Min':'–'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--green)">${wLohn?num(kosten)+' €':'–'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;color:var(--t2)">${z.notiz||''}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('paw-content').innerHTML = `
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;padding:12px;background:var(--card2);border-radius:8px">
-      <div><div style="font-size:11px;color:var(--t2)">Zeitraum</div><div style="font-weight:600">${periodLabel}</div></div>
+      <div><div style="font-size:11px;color:var(--t2)">Zeitraum</div><div style="font-weight:600;font-size:13px">${periodLabel}</div></div>
       <div><div style="font-size:11px;color:var(--t2)">Stunden gesamt</div><div style="font-family:'Bebas Neue';font-size:22px;color:var(--accent)">${totalH} h</div></div>
       ${lohn?`<div><div style="font-size:11px;color:var(--t2)">Lohnkosten</div><div style="font-family:'Bebas Neue';font-size:22px;color:var(--green)">${num(lohn)} €</div></div>`:''}
       <div><div style="font-size:11px;color:var(--t2)">Einträge</div><div style="font-weight:600">${projZ.length}</div></div>
     </div>
-    <div style="overflow:auto;max-height:55vh;border:1px solid var(--border);border-radius:8px">
+    <div style="overflow:auto;max-height:50vh;border:1px solid var(--border);border-radius:8px">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead style="background:var(--card2);position:sticky;top:0">
           <tr>
@@ -4051,12 +4114,7 @@ function openProjAuswertung(projId){
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <div class="mfooter">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-proj-ausw')">Schließen</button>
-      <button class="btn btn-green btn-sm" onclick="exportProjAuswertungExcel('${projId}')">📊 Excel Export</button>
-    </div>
-  </div>`;
-  modal.style.display='flex';
+  `;
 }
 
 // Mitarbeiter-Auswertung Zeitraum (von Datum bis Datum)
@@ -4253,17 +4311,21 @@ function exportMaZeitraumExcel(maId){
 
 function exportProjAuswertungExcel(projId){
   const p = projects.find(x=>String(x.id)===String(projId));
-  const month = document.getElementById('rep-month').value;
-  const mZ = repAllMonths ? zeiten : zeiten.filter(z=>z.datum.startsWith(month));
-  const projZ = mZ.filter(z=>String(z.projId)===String(projId) && (!z.art||z.art==='arbeit'))
-    .sort((a,b)=>a.datum.localeCompare(b.datum));
+  const von = document.getElementById('paw-von')?.value;
+  const bis = document.getElementById('paw-bis')?.value;
+  if(!von || !bis){ toast('Zeitraum fehlt','var(--orange)'); return; }
+  const projZ = zeiten.filter(z=>
+    String(z.projId)===String(projId) &&
+    (!z.art||z.art==='arbeit') &&
+    z.datum>=von && z.datum<=bis
+  ).sort((a,b)=>a.datum.localeCompare(b.datum));
 
   if(!projZ.length){ toast('Keine Daten zum Exportieren','var(--orange)'); return; }
 
   const ws_data = [
     ['Stundenauswertung'],
     ['Projekt:', p?p.name:'Unbekannt'],
-    ['Zeitraum:', repAllMonths?'Gesamt':month],
+    ['Zeitraum:', fmt(von)+' bis '+fmt(bis)],
     ['Kunde:', p?.kunde||''],
     [],
     ['Datum','Mitarbeiter','Stunden','Zeit','Pause (Min)','Stundensatz (€)','Lohnkosten (€)','Notiz']
@@ -4295,7 +4357,7 @@ function exportProjAuswertungExcel(projId){
   const ws = XLSX.utils.aoa_to_sheet(ws_data);
   ws['!cols'] = [{wch:12},{wch:22},{wch:9},{wch:14},{wch:11},{wch:14},{wch:14},{wch:30}];
   XLSX.utils.book_append_sheet(wb, ws, 'Stundenauswertung');
-  const filename = `Stunden_${(p?p.name:'Projekt').replace(/[^a-zA-Z0-9äöüÄÖÜß ]/g,'').slice(0,40)}_${repAllMonths?'Gesamt':month}.xlsx`;
+  const filename = `Stunden_${(p?p.name:'Projekt').replace(/[^a-zA-Z0-9äöüÄÖÜß ]/g,'').slice(0,40)}_${von}_bis_${bis}.xlsx`;
   XLSX.writeFile(wb, filename);
   toast('📊 Excel exportiert');
 }
