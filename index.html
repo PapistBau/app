@@ -403,6 +403,13 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 .allgtodo-check.done{background:var(--green);border-color:var(--green);color:#000;font-size:12px;}
 .allgtodo-body{flex:1;min-width:0;}
 .allgtodo-text{font-size:13.5px;font-weight:500;line-height:1.4;}
+/* Notizfelder - groß auf Desktop und Mobile */
+.notiz-grow{min-height:400px;}
+@media (max-width:768px){
+  .notiz-grow{min-height:70vh;}
+  #modal-allgtodo .modal,
+  #modal-todo .modal{max-height:96vh;height:96vh;}
+}
 .allgtodo-text.done{text-decoration:line-through;color:var(--t2);}
 .allgtodo-sub{font-size:12px;color:var(--t2);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;}
 .allgtodo-due.overdue{color:var(--red)!important;}
@@ -1481,7 +1488,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   </div>
   <div class="fg" style="flex:1;display:flex;flex-direction:column;min-height:0">
     <label class="fl">Notiz / Details</label>
-    <textarea class="fi" id="td-notiz" placeholder="z.B. 50kg Zement, Lieferant Baustoff Union anrufen…&#10;&#10;Hier kannst du mehrzeilige Notizen schreiben – das Feld passt sich dem Bildschirm an." style="resize:vertical;font-family:inherit;line-height:1.6;flex:1;min-height:min(55vh, 400px);font-size:14px;padding:14px"></textarea>
+    <textarea class="fi notiz-grow" id="td-notiz" placeholder="z.B. 50kg Zement, Lieferant Baustoff Union anrufen…&#10;&#10;Hier kannst du mehrzeilige Notizen schreiben – das Feld passt sich dem Bildschirm an." style="resize:vertical;font-family:inherit;line-height:1.6;flex:1;font-size:14px;padding:14px"></textarea>
   </div>
   <div class="mfooter">
     <button class="btn btn-ghost" onclick="closeModal('modal-todo')">Abbrechen</button>
@@ -1560,7 +1567,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   </div>
   <div class="fg" style="flex:1;display:flex;flex-direction:column;min-height:0">
     <label class="fl">Notiz</label>
-    <textarea class="fi" id="at-notiz" placeholder="Optional – hier kannst du längere Notizen schreiben, mehrere Zeilen sind möglich" style="resize:vertical;font-family:inherit;line-height:1.6;flex:1;min-height:min(55vh, 400px);font-size:14px;padding:14px"></textarea>
+    <textarea class="fi notiz-grow" id="at-notiz" placeholder="Optional – hier kannst du längere Notizen schreiben, mehrere Zeilen sind möglich" style="resize:vertical;font-family:inherit;line-height:1.6;flex:1;font-size:14px;padding:14px"></textarea>
   </div>
   <div class="mfooter">
     <button class="btn btn-ghost" onclick="closeModal('modal-allgtodo')">Abbrechen</button>
