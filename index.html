@@ -949,7 +949,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
       <button class="btn btn-primary" onclick="openTodoModal(null)">＋ Neue Aufgabe</button>
     </div>
   </div>
-  <div class="fbar" style="margin-bottom:16px">
+  <div class="fbar" style="margin-bottom:10px;flex-wrap:wrap">
     <select class="fs finput" id="todo-proj-filter" onchange="renderProjTodos()" style="max-width:260px">
       <option value="">Alle Projekte</option>
     </select>
@@ -958,6 +958,15 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div class="fpill" onclick="setTodoFilter('erledigt',this)">Erledigt</div>
     <div class="fpill" onclick="setTodoFilter('hoch',this)">🔴 Hoch</div>
     <div class="fpill" onclick="setTodoFilter('faellig',this)">⚠ Überfällig</div>
+  </div>
+  <div class="fbar" style="margin-bottom:16px;flex-wrap:wrap">
+    <span style="font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;align-self:center;margin-right:4px">Projektstatus:</span>
+    <div class="fpill active" id="tptyp-alle" onclick="setTodoProjTypFilter('alle')">Alle</div>
+    <div class="fpill" id="tptyp-laufend" onclick="setTodoProjTypFilter('laufend')">🔵 Laufend</div>
+    <div class="fpill" id="tptyp-abgeschlossen" onclick="setTodoProjTypFilter('abgeschlossen')">✅ Abgeschlossen</div>
+    <div class="fpill" id="tptyp-angebot" onclick="setTodoProjTypFilter('angebot')">📄 Angebot erstellt</div>
+    <div class="fpill" id="tptyp-angebot-offen" onclick="setTodoProjTypFilter('angebot-offen')">📋 Angebot ausstehend</div>
+    <div class="fpill" id="tptyp-anfrage" onclick="setTodoProjTypFilter('anfrage')">📬 Anfrage</div>
   </div>
   <div id="proj-todos-list"></div>
 </div>
@@ -2810,6 +2819,7 @@ function doBeauftragen(){
 // PROJEKT-AUFGABEN ÜBERSICHT
 // ════════════════════════════════════
 let todoStatusFilter = 'alle';
+let todoProjTypFilter = 'alle';
 
 function setTodoFilter(val, btn){
   todoStatusFilter = val;
@@ -2818,21 +2828,37 @@ function setTodoFilter(val, btn){
   renderProjTodos();
 }
 
+function setTodoProjTypFilter(val){
+  todoProjTypFilter = val;
+  ['alle','laufend','abgeschlossen','angebot','angebot-offen','anfrage'].forEach(k=>{
+    const el = document.getElementById('tptyp-'+k);
+    if(el) el.classList.toggle('active', k===val);
+  });
+  renderProjTodos();
+}
+
 function renderProjTodos(){
-  // Projekt-Dropdown befüllen
+  // Welche Projekte entsprechen dem Status-Filter?
+  const activeProjects = projects.filter(p=>!p.archiviert && (
+    todoProjTypFilter==='alle' || p.typ===todoProjTypFilter
+  ));
+  const activeProjIds = new Set(activeProjects.map(p=>String(p.id)));
+
+  // Projekt-Dropdown befüllen (nur Projekte die zum Status-Filter passen)
   const sel = document.getElementById('todo-proj-filter');
   if(sel){
     const prev = sel.value;
     sel.innerHTML = '<option value="">Alle Projekte</option>' +
-      projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
-    if(prev) sel.value = prev;
+      activeProjects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+    if(prev && activeProjIds.has(String(prev))) sel.value = prev;
+    else sel.value = '';
   }
 
   const projFilter = sel ? sel.value : '';
   const c = document.getElementById('proj-todos-list');
   if(!c) return;
 
-  let filtered = todos.filter(t => t.projId); // nur Projekt-Todos
+  let filtered = todos.filter(t => t.projId && activeProjIds.has(String(t.projId)));
   if(projFilter) filtered = filtered.filter(t=>String(t.projId)===String(projFilter));
   if(todoStatusFilter==='offen')    filtered = filtered.filter(t=>!t.done);
   if(todoStatusFilter==='erledigt') filtered = filtered.filter(t=>t.done);
