@@ -2582,18 +2582,25 @@ function openDetail(id){
   const isAng=p.typ==='angebot'||p.typ==='angebot-offen';
 
   // TODOS HTML
-  const todoRows=pTodos.length?pTodos.map(t=>`
+  const todoRows=pTodos.length?pTodos.map((t,idx)=>{
+    const isFirst=idx===0;
+    const isLast=idx===pTodos.length-1;
+    return`
     <div class="todo-item" style="flex-direction:column;align-items:flex-start;gap:6px">
       <div style="display:flex;align-items:center;gap:8px;width:100%">
         <div class="todo-check ${t.done?'done':''}" onclick="toggleTodo(${t.id},${id})">${t.done?'✓':''}</div>
         <span class="todo-text ${t.done?'done':''}" style="flex:1">${t.text}</span>
         <span class="todo-prio prio-${t.prio}">${t.prio}</span>
         ${t.due?`<span class="todo-due ${!t.done&&t.due<today()?'overdue':''}">${fmt(t.due)}</span>`:''}
+        <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+          <button onclick="moveProjTodo(${t.id},-1,${id})" ${isFirst?'disabled':''} title="Nach oben" style="background:var(--card2);border:1px solid var(--border);color:${isFirst?'var(--t3)':'var(--text)'};border-radius:4px;padding:2px 6px;font-size:10px;line-height:1;cursor:${isFirst?'default':'pointer'};opacity:${isFirst?'.3':'1'}">▲</button>
+          <button onclick="moveProjTodo(${t.id},1,${id})" ${isLast?'disabled':''} title="Nach unten" style="background:var(--card2);border:1px solid var(--border);color:${isLast?'var(--t3)':'var(--text)'};border-radius:4px;padding:2px 6px;font-size:10px;line-height:1;cursor:${isLast?'default':'pointer'};opacity:${isLast?'.3':'1'}">▼</button>
+        </div>
         <button class="edit-btn" onclick="openTodoModal(${id},'${t.id}')" title="Bearbeiten">✏</button>
         <button class="todo-del" onclick="delTodo(${t.id},${id})">✕</button>
       </div>
       ${t.notiz?`<div style="font-size:12px;color:var(--t2);padding-left:32px;line-height:1.5;white-space:pre-wrap">${t.notiz}</div>`:''}
-    </div>`).join(''):'<div style="color:var(--t2);font-size:13px;padding:10px 0">Keine Aufgaben</div>';
+    </div>`;}).join(''):'<div style="color:var(--t2);font-size:13px;padding:10px 0">Keine Aufgaben</div>';
 
   // FOTOS HTML
   const fotoItems=pFotos.map(f=>`
@@ -2865,20 +2872,58 @@ function renderProjTodos(){
           </div>
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openTodoModal(${projId})">＋</button>
         </div>
-        ${ptodos.sort((a,b)=>a.done-b.done).map(t=>`
+        ${(()=>{
+          const sortedTodos = ptodos.slice().sort((a,b)=>a.done-b.done);
+          return sortedTodos.map((t,idx)=>{
+            const isFirst=idx===0;
+            const isLast=idx===sortedTodos.length-1;
+            return`
           <div style="display:flex;flex-direction:column;gap:6px;padding:12px 16px;border-bottom:1px solid rgba(48,54,61,.3)">
             <div style="display:flex;align-items:center;gap:8px">
               <div class="todo-check ${t.done?'done':''}" onclick="toggleTodoProjPage(${t.id})">${t.done?'✓':''}</div>
               <span class="todo-text ${t.done?'done':''}" style="flex:1">${t.text}</span>
               <span class="todo-prio prio-${t.prio}">${t.prio}</span>
               ${t.due?`<span class="todo-due ${!t.done&&t.due<today()?'overdue':''}">${fmt(t.due)}</span>`:''}
+              <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+                <button onclick="moveProjTodo(${t.id},-1)" ${isFirst?'disabled':''} title="Nach oben" style="background:var(--card2);border:1px solid var(--border);color:${isFirst?'var(--t3)':'var(--text)'};border-radius:4px;padding:2px 6px;font-size:10px;line-height:1;cursor:${isFirst?'default':'pointer'};opacity:${isFirst?'.3':'1'}">▲</button>
+                <button onclick="moveProjTodo(${t.id},1)" ${isLast?'disabled':''} title="Nach unten" style="background:var(--card2);border:1px solid var(--border);color:${isLast?'var(--t3)':'var(--text)'};border-radius:4px;padding:2px 6px;font-size:10px;line-height:1;cursor:${isLast?'default':'pointer'};opacity:${isLast?'.3':'1'}">▼</button>
+              </div>
               <button class="edit-btn" onclick="openTodoModal(${t.projId},'${t.id}')" title="Bearbeiten">✏</button>
               <button class="todo-del" onclick="delTodoProjPage(${t.id})">✕</button>
             </div>
             ${t.notiz?`<div style="font-size:12px;color:var(--t2);padding-left:32px;line-height:1.5;white-space:pre-wrap">${t.notiz}</div>`:''}
-          </div>`).join('')}
+          </div>`;
+          }).join('');
+        })()}
       </div>`;
   }).join('');
+}
+
+function moveProjTodo(id, direction, detailProjId){
+  const t = todos.find(x=>x.id===id);
+  if(!t) return;
+  // Alle Projekt-Todos derselben Baustelle in aktueller Reihenfolge
+  const pTodos = todos.filter(x=>String(x.projId)===String(t.projId));
+  const localIdx = pTodos.findIndex(x=>x.id===id);
+  const newLocalIdx = localIdx + direction;
+  if(newLocalIdx < 0 || newLocalIdx >= pTodos.length) return;
+
+  const targetTodo = pTodos[newLocalIdx];
+  const idxA = todos.findIndex(x=>x.id===t.id);
+  const idxB = todos.findIndex(x=>x.id===targetTodo.id);
+  if(idxA<0 || idxB<0) return;
+
+  [todos[idxA], todos[idxB]] = [todos[idxB], todos[idxA]];
+  todos[idxA]._syncSession = SYNC_SESSION;
+  todos[idxB]._syncSession = SYNC_SESSION;
+
+  saveAll();
+  // Richtige Ansicht neu zeichnen
+  if(detailProjId!==undefined){
+    openDetail(detailProjId);
+  } else if(document.getElementById('page-proj-todos')?.classList.contains('active')){
+    renderProjTodos();
+  }
 }
 
 function toggleTodoProjPage(id){
@@ -5648,6 +5693,30 @@ function toggleAllgTodo(id){
   saveKatData();renderAllgTodos();
 }
 
+function moveAllgTodo(id, direction){
+  const t = allgTodos.find(x=>x.id===id);
+  if(!t) return;
+  // Finde alle Todos derselben Kategorie in aktueller Reihenfolge
+  const kTodos = allgTodos.filter(x=>x.katId===t.katId);
+  const localIdx = kTodos.findIndex(x=>x.id===id);
+  const newLocalIdx = localIdx + direction;
+  if(newLocalIdx < 0 || newLocalIdx >= kTodos.length) return;
+
+  const targetTodo = kTodos[newLocalIdx];
+  // Positionen im allgTodos-Array finden und tauschen
+  const idxA = allgTodos.findIndex(x=>x.id===t.id);
+  const idxB = allgTodos.findIndex(x=>x.id===targetTodo.id);
+  if(idxA<0 || idxB<0) return;
+
+  [allgTodos[idxA], allgTodos[idxB]] = [allgTodos[idxB], allgTodos[idxA]];
+  // Beide stempeln damit die Reihenfolge in die Cloud geht
+  allgTodos[idxA]._syncSession = SYNC_SESSION;
+  allgTodos[idxB]._syncSession = SYNC_SESSION;
+
+  saveKatData();
+  renderAllgTodos();
+}
+
 async function delAllgTodo(id){
   await trackDeleted('allgtodos', id);
   allgTodos = allgTodos.filter(t=>String(t.id)!==String(id));
@@ -5682,9 +5751,11 @@ function renderAllgTodos(){
     const kDone=kTodos.filter(t=>t.done).length;
     const pct=kTodos.length?Math.round(kDone/kTodos.length*100):0;
 
-    const todoRows=kTodos.length?kTodos.map(t=>{
+    const todoRows=kTodos.length?kTodos.map((t,idx)=>{
       const overdue=!t.done&&t.due&&t.due<today();
       const tid=String(t.id);
+      const isFirst=idx===0;
+      const isLast=idx===kTodos.length-1;
       return`<div class="allgtodo-item">
         <div class="allgtodo-check ${t.done?'done':''}" data-id="${tid}" onclick="toggleAllgTodo(${t.id})">${t.done?'✓':''}</div>
         <div class="allgtodo-body">
@@ -5694,6 +5765,10 @@ function renderAllgTodos(){
             ${t.due?`<span class="allgtodo-due ${overdue?'overdue':''}">${overdue?'⚠ Überfällig: ':'📅 '}${fmt(t.due)}</span>`:''}
           </div>
           ${t.notiz?`<div style="margin-top:8px;padding:8px 10px;background:var(--card2);border-left:3px solid ${k.color};border-radius:0 6px 6px 0;font-size:12px;color:var(--t2);line-height:1.5;white-space:pre-wrap">${t.notiz}</div>`:''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+          <button class="sort-btn" onclick="moveAllgTodo(${t.id},-1)" ${isFirst?'disabled':''} title="Nach oben" style="background:var(--card2);border:1px solid var(--border);color:${isFirst?'var(--t3)':'var(--text)'};border-radius:4px;padding:2px 6px;font-size:11px;line-height:1;cursor:${isFirst?'default':'pointer'};opacity:${isFirst?'.3':'1'}">▲</button>
+          <button class="sort-btn" onclick="moveAllgTodo(${t.id},1)" ${isLast?'disabled':''} title="Nach unten" style="background:var(--card2);border:1px solid var(--border);color:${isLast?'var(--t3)':'var(--text)'};border-radius:4px;padding:2px 6px;font-size:11px;line-height:1;cursor:${isLast?'default':'pointer'};opacity:${isLast?'.3':'1'}">▼</button>
         </div>
         <div style="display:flex;gap:5px;flex-shrink:0">
           <button class="edit-btn" onclick="openAllgTodoModal(${k.id},${t.id})">✏</button>
