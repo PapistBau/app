@@ -1466,10 +1466,9 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 
 <!-- TODO MODAL -->
 <div class="overlay" id="modal-todo" style="display:none" onclick="if(event.target===this)closeModal('modal-todo')">
-<div class="modal">
+<div class="modal" style="max-width:min(900px, 95vw);width:min(900px, 95vw);max-height:92vh;display:flex;flex-direction:column">
   <div class="mttl" id="todo-mttl">Aufgabe hinzufügen</div>
   <div class="fg"><label class="fl">Aufgabe *</label><input class="fi" id="td-text" placeholder="z.B. Material bestellen"></div>
-  <div class="fg"><label class="fl">Notiz / Details</label><textarea class="fi" id="td-notiz" placeholder="z.B. 50kg Zement, Lieferant Baustoff Union anrufen…" rows="3" style="resize:vertical;font-family:inherit;line-height:1.5"></textarea></div>
   <div class="frow">
     <div class="fg"><label class="fl">Priorität</label>
       <select class="fs" id="td-prio">
@@ -1479,6 +1478,10 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
       </select>
     </div>
     <div class="fg"><label class="fl">Fällig bis</label><input type="date" class="fi" id="td-due"></div>
+  </div>
+  <div class="fg" style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <label class="fl">Notiz / Details</label>
+    <textarea class="fi" id="td-notiz" placeholder="z.B. 50kg Zement, Lieferant Baustoff Union anrufen…&#10;&#10;Hier kannst du mehrzeilige Notizen schreiben – das Feld passt sich dem Bildschirm an." style="resize:vertical;font-family:inherit;line-height:1.6;flex:1;min-height:min(55vh, 400px);font-size:14px;padding:14px"></textarea>
   </div>
   <div class="mfooter">
     <button class="btn btn-ghost" onclick="closeModal('modal-todo')">Abbrechen</button>
@@ -1542,7 +1545,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 
 <!-- ALLG TODO ITEM MODAL -->
 <div class="overlay" id="modal-allgtodo" style="display:none" onclick="if(event.target===this)closeModal('modal-allgtodo')">
-<div class="modal">
+<div class="modal" style="max-width:min(900px, 95vw);width:min(900px, 95vw);max-height:92vh;display:flex;flex-direction:column">
   <div class="mttl" id="allgtodo-mttl">Aufgabe hinzufügen</div>
   <div class="fg"><label class="fl">Aufgabe *</label><input class="fi" id="at-text" placeholder="Was muss erledigt werden?"></div>
   <div class="frow">
@@ -1555,7 +1558,10 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     </div>
     <div class="fg"><label class="fl">Fällig bis</label><input type="date" class="fi" id="at-due"></div>
   </div>
-  <div class="fg"><label class="fl">Notiz</label><textarea class="fi" id="at-notiz" placeholder="Optional – hier kannst du längere Notizen schreiben, mehrere Zeilen sind möglich" rows="4" style="resize:vertical;font-family:inherit;line-height:1.5;min-height:80px"></textarea></div>
+  <div class="fg" style="flex:1;display:flex;flex-direction:column;min-height:0">
+    <label class="fl">Notiz</label>
+    <textarea class="fi" id="at-notiz" placeholder="Optional – hier kannst du längere Notizen schreiben, mehrere Zeilen sind möglich" style="resize:vertical;font-family:inherit;line-height:1.6;flex:1;min-height:min(55vh, 400px);font-size:14px;padding:14px"></textarea>
+  </div>
   <div class="mfooter">
     <button class="btn btn-ghost" onclick="closeModal('modal-allgtodo')">Abbrechen</button>
     <button class="btn btn-primary" onclick="saveAllgTodo()">💾 Speichern</button>
