@@ -405,10 +405,38 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 .allgtodo-text{font-size:13.5px;font-weight:500;line-height:1.4;}
 /* Notizfelder - groß auf Desktop und Mobile */
 .notiz-grow{min-height:400px;}
+/* Aufgaben-Modals groß auf PC + ziehbar */
+#modal-allgtodo .modal, #modal-todo .modal{
+  width:min(1200px, 92vw) !important;
+  max-width:min(1200px, 92vw) !important;
+  height:min(850px, 90vh) !important;
+  max-height:90vh !important;
+  min-width:400px;
+  min-height:400px;
+  resize:both !important;
+  overflow:auto !important;
+  display:flex !important;
+  flex-direction:column !important;
+}
+#modal-allgtodo .notiz-grow, #modal-todo .notiz-grow{flex:1 1 auto;min-height:300px;}
 @media (max-width:768px){
-  .notiz-grow{min-height:70vh;}
-  #modal-allgtodo .modal,
-  #modal-todo .modal{max-height:96vh;height:96vh;}
+  .notiz-grow{min-height:200px;flex:1 1 auto;}
+  /* Modal fast fullscreen auf mobile */
+  #modal-allgtodo, #modal-todo{padding:0 !important;align-items:stretch !important;}
+  #modal-allgtodo .modal, #modal-todo .modal{
+    max-width:100% !important;
+    width:100% !important;
+    max-height:100vh !important;
+    height:100vh !important;
+    min-width:0 !important;
+    min-height:0 !important;
+    border-radius:0 !important;
+    border:none !important;
+    padding:20px !important;
+    padding-top:max(20px, env(safe-area-inset-top, 20px)) !important;
+    padding-bottom:max(20px, env(safe-area-inset-bottom, 20px)) !important;
+    resize:none !important;
+  }
 }
 .allgtodo-text.done{text-decoration:line-through;color:var(--t2);}
 .allgtodo-sub{font-size:12px;color:var(--t2);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;}
