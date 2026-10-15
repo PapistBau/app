@@ -2855,15 +2855,26 @@ function renderProjTodos(){
     return;
   }
 
-  c.innerHTML = Object.entries(byProj).map(([projId, ptodos])=>{
+  // Alle einklappen / ausklappen Buttons oben
+  const alleProjIds = Object.keys(byProj);
+  const alleOffen = alleProjIds.every(pid => !collapsedProjTodos.has(String(pid)));
+  const headerControls = `
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-ghost btn-sm" onclick="toggleAllProjTodos(true)" title="Alle Aufgaben zuklappen">⯅ Alle einklappen</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleAllProjTodos(false)" title="Alle Aufgaben aufklappen">⯆ Alle ausklappen</button>
+    </div>`;
+
+  c.innerHTML = headerControls + Object.entries(byProj).map(([projId, ptodos])=>{
     const p = projects.find(x=>String(x.id)===String(projId));
     const s = p ? (SC[p.typ]||SC.laufend) : SC.laufend;
     const offen = ptodos.filter(t=>!t.done).length;
+    const isCollapsed = collapsedProjTodos.has(String(projId));
     return`
       <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--r);margin-bottom:14px;overflow:hidden">
-        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer" onclick="openDetail(${projId})">
+        <div style="padding:12px 16px;${isCollapsed?'':'border-bottom:1px solid var(--border);'}display:flex;align-items:center;gap:10px">
+          <button onclick="toggleProjTodoCollapse('${projId}')" title="${isCollapsed?'Ausklappen':'Einklappen'}" style="background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:14px;line-height:1;cursor:pointer;flex-shrink:0;font-weight:700">${isCollapsed?'▶':'▼'}</button>
           <div style="width:4px;height:32px;border-radius:2px;background:${s.col};flex-shrink:0"></div>
-          <div style="flex:1">
+          <div style="flex:1;cursor:pointer" onclick="openDetail(${projId})">
             <div style="font-weight:700;font-size:14px">${p?p.name:'Unbekanntes Projekt'}</div>
             <div style="font-size:12px;color:var(--t2)">${s.lbl}${p&&p.ort?' · '+p.ort:''}</div>
           </div>
@@ -2872,7 +2883,7 @@ function renderProjTodos(){
           </div>
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openTodoModal(${projId})">＋</button>
         </div>
-        ${(()=>{
+        ${isCollapsed ? '' : (()=>{
           const sortedTodos = ptodos.slice().sort((a,b)=>a.done-b.done);
           return sortedTodos.map((t,idx)=>{
             const isFirst=idx===0;
@@ -2897,6 +2908,26 @@ function renderProjTodos(){
         })()}
       </div>`;
   }).join('');
+}
+
+// Collapse-State für Projekt-Todos
+const collapsedProjTodos = new Set();
+
+function toggleProjTodoCollapse(projId){
+  const key = String(projId);
+  if(collapsedProjTodos.has(key)) collapsedProjTodos.delete(key);
+  else collapsedProjTodos.add(key);
+  renderProjTodos();
+}
+
+function toggleAllProjTodos(collapse){
+  collapsedProjTodos.clear();
+  if(collapse){
+    // Alle ids der aktuell sichtbaren Projekte sammeln
+    const projIds = [...new Set(todos.filter(t=>t.projId).map(t=>String(t.projId)))];
+    projIds.forEach(id=>collapsedProjTodos.add(id));
+  }
+  renderProjTodos();
 }
 
 function moveProjTodo(id, direction, detailProjId){
