@@ -661,21 +661,12 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div id="login-admin-view" style="display:none">
       <div style="font-size:15px;font-weight:600;text-align:center;margin-bottom:4px">Admin-Zugang</div>
       <div style="font-size:12px;color:var(--t2);text-align:center;margin-bottom:20px">Vollzugriff auf alle Bereiche</div>
-      <input type="password" class="fi" id="admin-pw-input" placeholder="Admin-Passwort" style="margin-bottom:12px;text-align:center;font-size:20px;letter-spacing:6px" onkeydown="if(event.key==='Enter')doAdminLogin()">
+      <input type="password" class="fi" id="admin-pw-input" placeholder="Admin-Passwort" autocomplete="current-password" style="margin-bottom:12px;text-align:center;font-size:20px;letter-spacing:6px" onkeydown="if(event.key==='Enter')doAdminLogin()">
       <button class="btn btn-primary" style="width:100%;padding:14px" onclick="doAdminLogin()">🔓 Als Admin anmelden</button>
       <div id="admin-login-error" style="color:var(--red);font-size:13px;text-align:center;margin-top:12px;min-height:20px"></div>
       <div style="text-align:center;margin-top:16px">
         <button onclick="showPinLogin()" style="background:none;border:none;color:var(--t2);font-size:12px;cursor:pointer;text-decoration:underline">← Zurück zur PIN-Eingabe</button>
       </div>
-    </div>
-    <!-- Ersteinrichtung -->
-    <div id="login-setup-view" style="display:none">
-      <div style="font-size:15px;font-weight:600;text-align:center;margin-bottom:8px">👋 Willkommen!</div>
-      <div style="font-size:13px;color:var(--t2);text-align:center;margin-bottom:20px;line-height:1.6">Bitte lege beim ersten Start ein Admin-Passwort fest.</div>
-      <input type="password" class="fi" id="setup-pw1" placeholder="Neues Passwort" style="margin-bottom:10px">
-      <input type="password" class="fi" id="setup-pw2" placeholder="Passwort wiederholen" style="margin-bottom:14px">
-      <button class="btn btn-primary" style="width:100%;padding:14px" onclick="doSetupAdmin()">✅ Festlegen & starten</button>
-      <div id="setup-error" style="color:var(--red);font-size:13px;text-align:center;margin-top:12px;min-height:20px"></div>
     </div>
   </div>
 </div>
@@ -6190,17 +6181,95 @@ function secretTap(){
   }
 }
 
-function hashPin(pin){
-  // Einfacher Hash (kein Crypto nötig für 4-stellige PIN)
-  let h = 0;
-  for(let i=0;i<pin.length;i++) h = ((h<<5)-h)+pin.charCodeAt(i)|0;
-  return String(h);
+// ════════════════════════════════════
+// ADMIN-ANMELDUNG ÜBER SUPABASE AUTH
+// ════════════════════════════════════
+// Genau ein Admin-Konto. Supabase prüft das Passwort; danach laufen alle
+// Datenbank-Anfragen mit dem Admin-Token statt mit dem öffentlichen Schlüssel.
+// Die Sitzung bleibt auf dem Gerät gespeichert, bis der Admin sich abmeldet.
+const ADMIN_EMAIL = 'info@papist-bau.de';
+const AUTH_KEY = 'bm_auth';
+let authRefreshTimer = null;
+
+// Reste des alten Passwort-Systems entfernen
+localStorage.removeItem('bm_admin_pw');
+if(sessionStorage.getItem('bm_session')==='admin') sessionStorage.removeItem('bm_session');
+
+function getAuthSession(){
+  try{ return JSON.parse(localStorage.getItem(AUTH_KEY)||'null'); }catch(e){ return null; }
 }
 
-// Admin-Passwort — fest hinterlegt, gilt immer
-const ADMIN_HASH_DEFAULT = '1689278';
-// Alten gespeicherten Hash löschen damit immer das eingebaute PW gilt
-localStorage.removeItem('bm_admin_pw');
+function setAuthSession(s){
+  clearTimeout(authRefreshTimer);
+  if(s){
+    localStorage.setItem(AUTH_KEY, JSON.stringify(s));
+    sbHeaders.Authorization = 'Bearer '+s.access_token;
+    // 2 Minuten vor Ablauf automatisch erneuern
+    const ms = s.expires_at*1000 - Date.now() - 120000;
+    authRefreshTimer = setTimeout(refreshAuthSession, Math.max(ms, 5000));
+  } else {
+    localStorage.removeItem(AUTH_KEY);
+    sbHeaders.Authorization = 'Bearer '+SB_KEY;
+  }
+}
+
+async function authRequest(grantType, body){
+  const res = await fetch(`${SB_URL}/auth/v1/token?grant_type=${grantType}`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','apikey':SB_KEY},
+    body:JSON.stringify(body)
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok){
+    const err = new Error(data.error_description||data.msg||data.message||('HTTP '+res.status));
+    err.status = res.status;
+    throw err;
+  }
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expires_at: data.expires_at || Math.floor(Date.now()/1000) + (data.expires_in||3600),
+  };
+}
+
+// Gibt true zurück, wenn danach eine gültige Admin-Sitzung besteht
+async function refreshAuthSession(){
+  const s = getAuthSession();
+  if(!s) return false;
+  try{
+    setAuthSession(await authRequest('refresh_token', {refresh_token:s.refresh_token}));
+    return true;
+  }catch(e){
+    if(e.status===400 || e.status===401 || e.status===403){
+      // Sitzung wurde von Supabase beendet → neu anmelden
+      setAuthSession(null);
+      if(currentUser==='admin'){ currentUser=null; showLoginScreen(); toast('🔒 Bitte erneut als Admin anmelden','var(--orange)'); }
+      return false;
+    }
+    // Keine Verbindung → Sitzung behalten, in 1 Minute erneut versuchen
+    authRefreshTimer = setTimeout(refreshAuthSession, 60000);
+    return true;
+  }
+}
+
+// Beim Start: gespeicherte Admin-Sitzung übernehmen (und ggf. erneuern)
+async function restoreAuthSession(){
+  const s = getAuthSession();
+  if(!s) return false;
+  if(s.expires_at*1000 - Date.now() < 5*60*1000) return refreshAuthSession();
+  setAuthSession(s);
+  return true;
+}
+
+function adminSignOut(){
+  const s = getAuthSession();
+  if(s){
+    fetch(`${SB_URL}/auth/v1/logout?scope=local`,{
+      method:'POST', headers:{'apikey':SB_KEY,'Authorization':'Bearer '+s.access_token}
+    }).catch(()=>{});
+  }
+  setAuthSession(null);
+}
 // Demo-IDs aus deleted_ids entfernen falls noch vorhanden
 try{
   const del = JSON.parse(localStorage.getItem('bm_deleted')||'{}');
@@ -6214,53 +6283,18 @@ try{
   if(changed) localStorage.setItem('bm_deleted', JSON.stringify(del));
 }catch(e){}
 
-async function getAdminHash(){
-  // Eingebautes Passwort hat immer Vorrang
-  return ADMIN_HASH_DEFAULT;
-}
-
-async function setAdminHash(pw){
-  // Nur lokal speichern (für künftige Passwortänderungen)
-  const hash = hashPin(pw);
-  localStorage.setItem('bm_admin_pw', hash);
-  try {
-    await fetch(`${SB_URL}/rest/v1/settings`, {
-      method:'POST',
-      headers:{...sbHeaders,'Prefer':'resolution=merge-duplicates'},
-      body:JSON.stringify({key:'admin_pw', value:hash})
-    });
-  } catch(e){}
-}
-
-async function showLoginScreen(){
+function showLoginScreen(){
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('main-app').style.display='none';
   document.getElementById('ma-app').style.display='none';
   // Immer PIN-View zeigen — Admin-Button versteckt
   document.getElementById('login-pin-view').style.display='block';
   document.getElementById('login-admin-view').style.display='none';
-  document.getElementById('login-setup-view').style.display='none';
   document.getElementById('admin-login-btn').style.display='none';
-  document.getElementById('login-prompt').textContent='⏳ Verbinde …';
-  document.getElementById('login-sub').textContent='';
+  document.getElementById('login-prompt').textContent='PIN eingeben';
+  document.getElementById('login-sub').textContent='Mitarbeiter-PIN';
   pinBuffer='';
   updatePinDots();
-
-  const hash = await getAdminHash();
-  if(!hash){
-    // Kein Passwort → Setup nur mit ?setup=1
-    const isSetup = new URLSearchParams(window.location.search).get('setup')==='1';
-    if(isSetup){
-      document.getElementById('login-pin-view').style.display='none';
-      document.getElementById('login-setup-view').style.display='flex';
-    } else {
-      document.getElementById('login-prompt').textContent='PIN eingeben';
-      document.getElementById('login-sub').textContent='Mitarbeiter-PIN';
-    }
-  } else {
-    document.getElementById('login-prompt').textContent='PIN eingeben';
-    document.getElementById('login-sub').textContent='Mitarbeiter-PIN';
-  }
 }
 
 function showAdminLogin(){
@@ -6276,29 +6310,27 @@ function showPinLogin(){
   document.getElementById('admin-login-error').textContent='';
 }
 
-async function doSetupAdmin(){
-  const pw1=document.getElementById('setup-pw1').value;
-  const pw2=document.getElementById('setup-pw2').value;
-  const err=document.getElementById('setup-error');
-  if(pw1.length<4){err.textContent='Mindestens 4 Zeichen.';return;}
-  if(pw1!==pw2){err.textContent='Passwörter stimmen nicht überein.';return;}
-  err.textContent='⏳ Wird gespeichert …';
-  await setAdminHash(pw1);
-  loginAsAdmin();
-}
-
 async function doAdminLogin(){
-  const pw=document.getElementById('admin-pw-input').value;
+  const input=document.getElementById('admin-pw-input');
   const err=document.getElementById('admin-login-error');
+  if(!input.value) return;
   err.textContent='⏳ Prüfe …';
-  const hash = await getAdminHash();
-  if(hashPin(pw)===hash){
-    loginAsAdmin();
-  } else {
-    err.textContent='Falsches Passwort.';
-    document.getElementById('admin-pw-input').value='';
-    setTimeout(()=>err.textContent='',2000);
+  try{
+    setAuthSession(await authRequest('password', {email:ADMIN_EMAIL, password:input.value}));
+  }catch(e){
+    input.value='';
+    err.textContent = e.status===400 ? 'Falsches Passwort.'
+      : e.status===429 ? 'Zu viele Versuche – bitte kurz warten.'
+      : '⚠ Keine Verbindung – bitte erneut versuchen.';
+    setTimeout(()=>err.textContent='',3000);
+    return;
   }
+  input.value='';
+  err.textContent='⏳ Lade Daten …';
+  // Daten mit Admin-Berechtigung neu laden
+  await loadFromCloud();
+  err.textContent='';
+  loginAsAdmin();
 }
 
 // Auto-Logout Timer für Mitarbeiter (3 Minuten)
@@ -6334,7 +6366,6 @@ function stopMaLogoutTimer(){
 
 function loginAsAdmin(){
   currentUser='admin';
-  sessionStorage.setItem('bm_session','admin');
   document.getElementById('login-screen').style.display='none';
   document.getElementById('main-app').style.display='block';
   document.getElementById('ma-app').style.display='none';
@@ -6469,6 +6500,7 @@ async function loginAsMitarbeiter(ma){
 
 function doLogout(){
   stopMaLogoutTimer();
+  if(currentUser==='admin') adminSignOut();
   currentUser=null;
   sessionStorage.removeItem('bm_session');
   pinBuffer='';
@@ -6896,13 +6928,10 @@ async function initAuth(){
       if(ma){loginAsMitarbeiter(ma);return;}
     }catch(e){}
   }
-  // Admin-Session nur wiederherstellen wenn explizit gewünscht
-  // (sessionStorage leert sich beim Tab schließen — sicher genug)
-  if(sess==='admin'){
+  // Gespeicherte Admin-Sitzung (Supabase) → direkt in die Admin-Ansicht
+  if(getAuthSession()){
     loginAsAdmin(); return;
   }
-  // Passwort vorladen
-  await getAdminHash();
   showLoginScreen();
 }
 
@@ -6987,19 +7016,34 @@ async function syncToCloud(){
   }
 }
 
+// Lädt alle Tabellen vollständig. Supabase liefert max. 1000 Zeilen pro Abruf,
+// daher wird in Paketen geladen. Schlägt ein Abruf fehl, wird ein Fehler geworfen,
+// damit die lokal gespeicherten Daten NICHT durch leere Listen ersetzt werden.
 async function sbLoadAll(){
   const tables=['projects','workers','zeiten','rechnungen','todos','kategorien','allgtodos','fotos','material'];
+  const PAGE=1000;
   const results={};
   for(const t of tables){
-    try{
-      const res=await fetch(`${SB_URL}/rest/v1/${t}?select=data&order=updated_at.desc`,{headers:sbHeaders});
-      results[t]=res.ok?(await res.json()).map(r=>r.data):[];
-    }catch(e){ results[t]=[]; }
+    const rows=[];
+    for(let off=0;;off+=PAGE){
+      const res=await fetch(`${SB_URL}/rest/v1/${t}?select=data&order=updated_at.desc,id.asc&offset=${off}&limit=${PAGE}`,{headers:sbHeaders});
+      if(!res.ok) throw new Error(`${t}: ${res.status}`);
+      const page=await res.json();
+      page.forEach(r=>rows.push(r.data));
+      if(page.length<PAGE) break;
+    }
+    results[t]=rows;
   }
   return results;
 }
 
 async function initFromCloud(){
+  await restoreAuthSession();
+  await loadFromCloud();
+  initAuth();
+}
+
+async function loadFromCloud(){
   setSyncStatus('saving');
   try{
     // Gelöschte IDs laden
@@ -7044,7 +7088,6 @@ async function initFromCloud(){
     setSyncStatus('offline');
     toast('⚠ Offline – lokale Daten werden verwendet','var(--orange)');
   }
-  initAuth();
 }
 
 
