@@ -6372,11 +6372,38 @@ function loginAsAdmin(){
   renderDashboard();
 }
 
-// Brute-Force Schutz
-let pinFehlversuche = 0;
+// Brute-Force Schutz: Zählung und Sperre macht der Server (5 Fehlversuche → 15 Min.),
+// hier nur die Anzeige der Restzeit
 let pinGesperrtBis = 0;
-const PIN_MAX_VERSUCHE = 5;
-const PIN_SPERRE_MS = 2 * 60 * 1000; // 2 Minuten
+
+// ════════════════════════════════════
+// MITARBEITER: PIN-ANMELDUNG ÜBER DEN SERVER
+// ════════════════════════════════════
+// Mitarbeiter bekommen nur ihre eigenen Stunden und die buchbaren Baustellen.
+// Alle Zugriffe laufen über die Datenbank-Funktionen ma_* (siehe db/002_mitarbeiter_pin.sql).
+let maToken = null;
+
+async function maRpc(fn, args){
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY},
+    body:JSON.stringify(args)
+  });
+  if(!res.ok) throw new Error(`${fn}: ${res.status}`);
+  return res.json();
+}
+
+// Firmendaten aus dem Gerätespeicher entfernen (Geräte ohne Admin-Anmeldung)
+function clearLocalData(){
+  ['bm_proj','bm_ma','bm_zeit','bm_rech','bm_todos','bm_fotos','bm_kat','bm_allgtodos','bm_material','bm_deleted','bm_last_save']
+    .forEach(k=>localStorage.removeItem(k));
+  projects=[]; workers=[]; zeiten=[]; rechnungen=[]; todos=[]; fotos=[]; kategorien=[]; allgTodos=[]; material=[];
+}
+
+function maSitzungAbgelaufen(){
+  toast('🔒 Bitte erneut mit PIN anmelden','var(--orange)');
+  doLogout();
+}
 
 function pinPress(key){
   // Gesperrt?
@@ -6404,27 +6431,37 @@ function updatePinDots(){
   }
 }
 
-function checkPin(){
+async function checkPin(){
   // Gesperrt?
   if(Date.now() < pinGesperrtBis){
     pinBuffer=''; updatePinDots(); return;
   }
 
-  const ma=workers.find(w=>w.pin&&w.pin===pinBuffer&&!w.archiviert);
-  if(ma){
-    pinFehlversuche=0; // Reset bei Erfolg
-    loginAsMitarbeiter(ma);
+  const errEl = document.getElementById('login-error');
+  errEl.textContent='⏳ Prüfe …';
+  let r;
+  try{
+    r = await maRpc('ma_login', {p_pin: pinBuffer});
+  }catch(e){
+    errEl.textContent='⚠ Keine Verbindung – bitte erneut versuchen';
+    setTimeout(()=>{ pinBuffer=''; updatePinDots(); if(errEl.textContent.startsWith('⚠')) errEl.textContent=''; },2000);
+    return;
+  }
+  if(r.ok){
+    errEl.textContent='';
+    loginAsMitarbeiter(r);
     return;
   }
 
   // Fehlversuch
-  pinFehlversuche++;
   for(let i=0;i<4;i++) document.getElementById('dot-'+i).className='pin-dot error';
 
-  if(pinFehlversuche >= PIN_MAX_VERSUCHE){
-    pinGesperrtBis = Date.now() + PIN_SPERRE_MS;
-    pinFehlversuche = 0;
-    document.getElementById('login-error').textContent='🔒 5 Fehlversuche — gesperrt für 2 Minuten';
+  if(r.doppelt){
+    errEl.textContent='Diese PIN ist doppelt vergeben – bitte im Büro melden';
+    setTimeout(()=>{ pinBuffer=''; updatePinDots(); },2500);
+  } else if(r.gesperrt){
+    pinGesperrtBis = Date.now() + (r.sekunden||900)*1000;
+    errEl.textContent=`🔒 Zu viele Fehlversuche — gesperrt für ${Math.ceil((r.sekunden||900)/60)} Minuten`;
     // Countdown anzeigen
     const countdown = setInterval(()=>{
       const rest = Math.ceil((pinGesperrtBis - Date.now()) / 1000);
@@ -6438,7 +6475,7 @@ function checkPin(){
       }
     }, 1000);
   } else {
-    const rest = PIN_MAX_VERSUCHE - pinFehlversuche;
+    const rest = r.rest;
     document.getElementById('login-error').textContent=`Falsche PIN – noch ${rest} Versuch${rest!==1?'e':''}`;
     setTimeout(()=>{
       pinBuffer=''; updatePinDots();
@@ -6448,9 +6485,14 @@ function checkPin(){
   }
 }
 
-async function loginAsMitarbeiter(ma){
-  currentUser={id:ma.id, name:ma.vorname+' '+ma.nachname};
-  sessionStorage.setItem('bm_session', JSON.stringify(currentUser));
+// login = Antwort von ma_login: {token, mitarbeiter:{id, vorname, nachname}}
+async function loginAsMitarbeiter(login){
+  const ma = login.mitarbeiter;
+  sessionStorage.setItem('bm_session', JSON.stringify({id:ma.id, name:ma.vorname+' '+ma.nachname, token:login.token}));
+  await startMitarbeiterAnsicht(login.token);
+}
+
+async function startMitarbeiterAnsicht(token){
   document.getElementById('login-screen').style.display='none';
   document.getElementById('main-app').style.display='none';
   const bnav = document.querySelector('.bnav');
@@ -6459,27 +6501,24 @@ async function loginAsMitarbeiter(ma){
   maApp.style.display='block';
   document.getElementById('ma-app-name').textContent='⏳ Lädt …';
 
-  // Frische Daten aus Supabase laden — mit deleted_ids Filter
-  try{
-    const deletedIds = new Set();
-    try{
-      const delRes = await fetch(`${SB_URL}/rest/v1/deleted_ids?select=id`,{headers:sbHeaders});
-      if(delRes.ok){ const rows = await delRes.json(); rows.forEach(r=>deletedIds.add(r.id)); }
-    }catch(e){}
-    // Demo-IDs immer blocken
-    ['1','2','3','4','5','6','7'].forEach(id=>{
-      ['projects','rechnungen','todos','allgtodos','kategorien'].forEach(t=>deletedIds.add(`${t}:${id}`));
-    });
+  // Nur die eigenen Daten vom Server holen
+  let d = null;
+  try{ d = await maRpc('ma_daten', {p_token: token}); }catch(e){ console.warn('ma_daten fehlgeschlagen', e); }
+  if(!d || !d.ok){
+    sessionStorage.removeItem('bm_session');
+    maToken = null;
+    showLoginScreen();
+    if(bnav) bnav.style.display='';
+    toast(d && d.abgelaufen ? '🔒 Bitte erneut mit PIN anmelden' : '⚠ Keine Verbindung – bitte erneut versuchen','var(--orange)');
+    return;
+  }
+  maToken = token;
+  const frischeMa = d.mitarbeiter;
+  currentUser = {id:frischeMa.id, name:frischeMa.vorname+' '+frischeMa.nachname};
+  workers  = [frischeMa];
+  zeiten   = d.zeiten || [];
+  projects = d.projekte || [];
 
-    const notDel = (table, items) => (items||[]).filter(x=>!deletedIds.has(`${table}:${String(x.id)}`));
-    const cloudData = await sbLoadAll();
-    projects   = notDel('projects',   cloudData.projects);
-    workers    = cloudData.workers    || workers;
-    zeiten     = cloudData.zeiten     || zeiten;
-    rechnungen = notDel('rechnungen', cloudData.rechnungen);
-  }catch(e){ console.warn('Reload bei Login fehlgeschlagen',e); }
-
-  const frischeMa = workers.find(w=>String(w.id)===String(ma.id)) || ma;
   document.getElementById('ma-app-name').textContent='Hallo, '+frischeMa.vorname+'!';
 
   renderMaZeiterfassung(frischeMa.id);
@@ -6501,6 +6540,9 @@ async function loginAsMitarbeiter(ma){
 function doLogout(){
   stopMaLogoutTimer();
   if(currentUser==='admin') adminSignOut();
+  if(maToken){ maRpc('ma_logout', {p_token: maToken}).catch(()=>{}); maToken=null; }
+  // Nach dem Abmelden keine Firmendaten auf dem Gerät lassen
+  clearLocalData();
   currentUser=null;
   sessionStorage.removeItem('bm_session');
   pinBuffer='';
@@ -6759,7 +6801,7 @@ function renderMaZeiterfassung(maId, filterMonth){
           </div>
         </div>
 
-        <button class="btn btn-primary" style="padding:16px;font-size:16px;font-weight:700;border-radius:12px" onclick="saveMaZeit('${maId}')">
+        <button id="ma-save-btn" class="btn btn-primary" style="padding:16px;font-size:16px;font-weight:700;border-radius:12px" onclick="saveMaZeit('${maId}')">
           ${t.speichern}
         </button>
         <div id="ma-save-msg" style="text-align:center;font-size:14px;min-height:20px;font-weight:600"></div>
@@ -6855,7 +6897,7 @@ function setMaArt(art, btn){
   }
 }
 
-function saveMaZeit(maId){
+async function saveMaZeit(maId){
   const datum = document.getElementById('ma-z-datum').value;
   const msg   = document.getElementById('ma-save-msg');
   const art   = maAktuelleArt || 'arbeit';
@@ -6877,23 +6919,32 @@ function saveMaZeit(maId){
     const nettoMin=Math.max(0,totalMin-pause);
     const std=Math.round(nettoMin/60*100)/100;
     if(std<=0){ msg.style.color='var(--red)'; msg.textContent='Arbeitszeit muss größer als 0 sein.'; return; }
-    z={id:Date.now(),datum,maId:parseInt(maId)||maId,projId,std,
+    z={datum,projId,std,
       zeit:`${von} – ${bis}`,pause,
       art:'arbeit',
-      notiz:document.getElementById('ma-z-notiz').value.trim(),
-      _syncSession:SYNC_SESSION};
+      notiz:document.getElementById('ma-z-notiz').value.trim()};
   } else {
     // Abwesenheit — kein Projekt, 8h Standard
     const artLabels = {urlaub:'🏖 Urlaub',feiertag:'🎉 Feiertag',krank:'🤒 Krank','urlaub-unbezahlt':'📋 Unbez. Urlaub'};
     const stdFuerArt = art==='urlaub-unbezahlt' ? 0 : 8;
-    z={id:Date.now(),datum,maId:parseInt(maId)||maId,projId:null,std:stdFuerArt,
+    z={datum,projId:null,std:stdFuerArt,
       art, zeit:'',pause:0,
-      notiz:(document.getElementById('ma-z-abw-notiz')?.value.trim())||artLabels[art]||art,
-      _syncSession:SYNC_SESSION};
+      notiz:(document.getElementById('ma-z-abw-notiz')?.value.trim())||artLabels[art]||art};
   }
 
+  // Speichern über den Server (prüft Mitarbeiter und Baustelle selbst)
+  const btn = document.getElementById('ma-save-btn');
+  if(btn) btn.disabled = true;
+  msg.style.color='var(--t2)'; msg.textContent='⏳ Speichere …';
+  let r;
+  try{ r = await maRpc('ma_zeit_speichern', {p_token: maToken, p_eintrag: z}); }catch(e){ r = null; }
+  if(btn) btn.disabled = false;
+  if(!r){ msg.style.color='var(--red)'; msg.textContent='⚠ Keine Verbindung – NICHT gespeichert. Bitte erneut versuchen.'; return; }
+  if(r.abgelaufen){ maSitzungAbgelaufen(); return; }
+  if(!r.ok){ msg.style.color='var(--red)'; msg.textContent='⚠ '+(r.fehler||'Nicht gespeichert'); return; }
+  z = r.eintrag;
+
   zeiten.unshift(z);
-  saveAll();
   msg.style.color='var(--green)';
   msg.textContent = art==='arbeit' ? `✅ ${z.std.toString().replace('.',',')} Stunden gespeichert!` : `✅ ${z.notiz} eingetragen!`;
   // Felder leeren
@@ -6914,7 +6965,15 @@ function deleteMaZeit(zid, maId){
   const z=zeiten.find(x=>String(x.id)===String(zid));
   const month=z?z.datum.slice(0,7):today().slice(0,7);
   confirmDelete('Eintrag löschen?','Dieser Zeiteintrag wird gelöscht.',
-    async ()=>{await trackDeleted('zeiten', zid);zeiten=zeiten.filter(x=>String(x.id)!==String(zid));saveAll();renderMaZeiterfassung(maId,month);}
+    async ()=>{
+      let r;
+      try{ r = await maRpc('ma_zeit_loeschen', {p_token: maToken, p_id: Number(zid)}); }catch(e){ r = null; }
+      if(!r){ toast('⚠ Keine Verbindung – nicht gelöscht','var(--red)'); return; }
+      if(r.abgelaufen){ maSitzungAbgelaufen(); return; }
+      if(!r.ok){ toast('⚠ '+(r.fehler||'Nicht gelöscht'),'var(--red)'); return; }
+      zeiten=zeiten.filter(x=>String(x.id)!==String(zid));
+      renderMaZeiterfassung(maId,month);
+    }
   );
 }
 
@@ -6924,9 +6983,9 @@ async function initAuth(){
   if(sess && sess!=='admin'){
     try{
       const u=JSON.parse(sess);
-      const ma=workers.find(w=>String(w.id)===String(u.id));
-      if(ma){loginAsMitarbeiter(ma);return;}
+      if(u.token){ await startMitarbeiterAnsicht(u.token); return; }
     }catch(e){}
+    sessionStorage.removeItem('bm_session');
   }
   // Gespeicherte Admin-Sitzung (Supabase) → direkt in die Admin-Ansicht
   if(getAuthSession()){
@@ -7038,8 +7097,14 @@ async function sbLoadAll(){
 }
 
 async function initFromCloud(){
-  await restoreAuthSession();
-  await loadFromCloud();
+  if(await restoreAuthSession()){
+    // Admin: alle Daten laden
+    await loadFromCloud();
+  } else {
+    // Mitarbeiter-/fremdes Gerät: keine Firmendaten laden, alte Kopien entfernen.
+    // Mitarbeiter holen ihre eigenen Daten nach der PIN-Anmeldung über ma_daten.
+    clearLocalData();
+  }
   initAuth();
 }
 
