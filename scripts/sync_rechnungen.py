@@ -2,7 +2,7 @@
 Rechnungs-Sync: holt Eingangsrechnungen (PDF-Anhänge) aus dem Postfach rechnungen@papist-bau.de
 und legt sie in Supabase ab (Tabelle eingangsrechnungen + privater Speicher "eingangsrechnungen").
 
-Postfach-Aufbau:  Posteingang/03 Rechnungen/<Nr> <Bauvorhaben>/...   z. B. ".../76 Amperweg 13 Tassilobau Kirchheim"
+Postfach-Aufbau:  Posteingang/03 Rechnungen/<Nr> <Bauvorhaben>/...   z. B. ".../76 Lindenweg 13 Musterbau Feldkirchen"
 Zuordnung:        rechnungsordner_mapping. Das Skript ordnet NIE selbst zu (Vorgabe Andy): Es trägt jeden Ordner
                   mit einem Vorschlag ein (quelle='auto', projekt_id=NULL). Übernommen werden nur Ordner, die Andy
                   bestätigt hat (quelle='manuell', projekt_id gesetzt). quelle='manuell' ohne Projekt = ignoriert.
@@ -267,10 +267,17 @@ def main(nur_ordner=False):
     fehler = None
 
     try:
-        # Bestand aus Supabase
-        projekte_roh = sb_select_all("projects", "id,name:data->>name")
+        # Bestand aus Supabase. Vorgabe Andy: Rechnungen NUR für Projekte, die laufend oder abgeschlossen sind
+        # UND auf die Stunden gebucht wurden (keine Angebote/Anfragen, keine Projekte ohne Stunden).
+        projekte_roh = sb_select_all("projects", "id,name:data->>name,typ:data->>typ")
         geloescht = {r["id"] for r in sb_select_all("deleted_ids", "id", "&id=like.projects:*")}
-        projekte = [(p["id"], p["name"] or "") for p in projekte_roh if f"projects:{p['id']}" not in geloescht]
+        mit_stunden = {z["projId"] for z in sb_select_all("zeiten", "projId:data->>projId,std:data->>std")
+                       if z["projId"] and float(z["std"] or 0) > 0}
+        projekte = [(p["id"], p["name"] or "") for p in projekte_roh
+                    if f"projects:{p['id']}" not in geloescht
+                    and p["typ"] in ("laufend", "abgeschlossen")
+                    and str(p["id"]) in mit_stunden]
+        erlaubt = {pid for pid, _ in projekte}
         mapping = {m["ordner_name"]: m for m in
                    sb_select_all("rechnungsordner_mapping", "ordner_name,projekt_id,quelle,vorschlag_projekt_id")}
         bekannt = {}
@@ -279,7 +286,9 @@ def main(nur_ordner=False):
 
         def bestaetigtes_projekt(ordner):
             m = mapping.get(ordner)
-            return m["projekt_id"] if m and m["quelle"] == "manuell" and m["projekt_id"] else None
+            if m and m["quelle"] == "manuell" and m["projekt_id"] in erlaubt:
+                return m["projekt_id"]
+            return None
 
         imap = imaplib.IMAP4_SSL(IMAP_HOST, 993)
         imap.login(IMAP_USER, IMAP_PASSWORD)
@@ -402,18 +411,18 @@ def selbsttest():
     assert imap_utf7_decode("03 BV M&APw-nchen") == "03 BV München"
     assert imap_utf7_decode("A&-B") == "A&B"
 
-    # Vorschläge mit echten Namensmustern aus Postfach und App
-    projekte = [(10, "Renovierungsarbeiten Amperweg 13 Kirchheim Tassilobau"),
-                (11, "Renovierungsarbeiten Meichelbeckstr. 14 München Tassilobau"),
-                (12, "Villa Hauber Murnau Kohlgruberstr. 61"),
-                (13, "Baubegleitung Bauer Apartmenthaus Aschheim"),
-                (14, "Bauer Ismaningerstr 2 Aschheim"),
-                (15, "Badsanierung Stollbergstr. 6 München Tassilobau")]
-    assert vorschlag_projekt("76 Amperweg 13 Tassilobau Kirchheim", projekte) == 10
-    assert vorschlag_projekt("74 Harlaching Tassilobau Meichelbeckstr", projekte) == 11
-    assert vorschlag_projekt("03 BV Hauber Murnau", projekte) == 12
-    assert vorschlag_projekt("59 Aschheim Bauer Apartments", projekte) == 13    # Apartments ≈ Apartmenthaus
-    assert vorschlag_projekt("05 BV Bauer Aschheim", projekte) is None          # zwei ähnliche → kein Vorschlag
+    # Vorschläge – ausgedachte Namen (öffentliches Repository!), aber mit denselben Mustern wie im echten Postfach
+    projekte = [(10, "Renovierungsarbeiten Lindenweg 13 Feldkirchen Musterbau"),
+                (11, "Renovierungsarbeiten Kastanienstr. 14 München Musterbau"),
+                (12, "Villa Adler Seeshaupt Bergstr. 61"),
+                (13, "Baubegleitung Brandl Apartmenthaus Poing"),
+                (14, "Brandl Gartenstr 2 Poing"),
+                (15, "Badsanierung Ahornstr. 6 München Musterbau")]
+    assert vorschlag_projekt("76 Lindenweg 13 Musterbau Feldkirchen", projekte) == 10
+    assert vorschlag_projekt("74 Sendling Musterbau Kastanienstr", projekte) == 11
+    assert vorschlag_projekt("03 BV Adler Seeshaupt", projekte) == 12
+    assert vorschlag_projekt("59 Poing Brandl Apartments", projekte) == 13      # Apartments ≈ Apartmenthaus
+    assert vorschlag_projekt("05 BV Brandl Poing", projekte) is None            # zwei ähnliche → kein Vorschlag
     assert vorschlag_projekt("12 BV Schmidt", projekte) is None                 # kein Treffer
     assert vorschlag_projekt("0000 Archiv", projekte) is None
 
@@ -436,14 +445,14 @@ def selbsttest():
     ordner = rechnungs_ordner([
         ("INBOX", ["INBOX"], "\\HasChildren"),
         ("INBOX/03 Rechnungen", ["INBOX", "03 Rechnungen"], "\\HasChildren"),
-        ("INBOX/03 Rechnungen/76 Amperweg 13 Tassilobau Kirchheim",
-         ["INBOX", "03 Rechnungen", "76 Amperweg 13 Tassilobau Kirchheim"], "\\HasNoChildren"),
-        ("INBOX/03 Rechnungen/47 Trittner/Nachtrag", ["INBOX", "03 Rechnungen", "47 Trittner", "Nachtrag"], ""),
-        ("03 Rechnungen/50 Wehner Badsanierung", ["03 Rechnungen", "50 Wehner Badsanierung"], ""),
+        ("INBOX/03 Rechnungen/76 Lindenweg 13 Musterbau Feldkirchen",
+         ["INBOX", "03 Rechnungen", "76 Lindenweg 13 Musterbau Feldkirchen"], "\\HasNoChildren"),
+        ("INBOX/03 Rechnungen/47 Kaufmann/Nachtrag", ["INBOX", "03 Rechnungen", "47 Kaufmann", "Nachtrag"], ""),
+        ("03 Rechnungen/50 Weber Badsanierung", ["03 Rechnungen", "50 Weber Badsanierung"], ""),
         ("Gesendet", ["Gesendet"], ""),
     ])
-    assert [o for _, o in ordner] == [OHNE_ORDNER, "76 Amperweg 13 Tassilobau Kirchheim", "47 Trittner",
-                                      "50 Wehner Badsanierung"], ordner
+    assert [o for _, o in ordner] == [OHNE_ORDNER, "76 Lindenweg 13 Musterbau Feldkirchen", "47 Kaufmann",
+                                      "50 Weber Badsanierung"], ordner
     print("Selbsttest OK")
     return 0
 
