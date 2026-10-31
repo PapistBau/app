@@ -322,8 +322,38 @@ def kandidaten(text):
     return gefunden
 
 
-def betrag_aus_text(text):
+# Abschlags-/Schlussrechnungen: immer prüfen (Vorgabe Andy), damit Abschläge nicht doppelt zählen
+ABSCHLUSS = r"abschlag|schlussrechnung|schlußrechnung|teilrechnung|anzahlung"
+# Andys eigene Kundenrechnungen (Nummernkreis z. B. „Rechnung 4436-26_…“) sind keine Kosten (Vorgabe Andy)
+EIGENE_RE = re.compile(r"^(?:rechnung|gutschrift|schlussrechnung|stornorechnung)\s*\d{4}-\d{2}(?:[_\s.]|$)", re.IGNORECASE)
+
+
+def betrag_aus_text(text, betreff="", dateiname=""):
     """Liefert dict mit netto, mwst, brutto, nr, status ('sicher'/'pruefen') und hinweis."""
+    erg = _betrag_aus_pdf(text)
+    # Betrag im Dateinamen (Andy schreibt ihn oft hinein, z. B. „OBI 28.07.26 78,94€ Husel.pdf“) als Abgleich
+    namens_betraege = [zahl(b.group(0)) for b in BETRAG_RE.finditer(dateiname or "")]
+    if namens_betraege:
+        nb = namens_betraege[-1]
+        if erg["brutto"] is not None or erg["netto"] is not None:
+            if nb in (erg["brutto"], erg["netto"]):
+                if erg["status"] == "sicher":
+                    erg["hinweis"] = (erg["hinweis"] + " · " if erg["hinweis"] else "") + "Dateiname bestätigt"
+            elif erg["status"] == "sicher":
+                erg["status"] = "pruefen"
+                erg["hinweis"] = f"Dateiname nennt {nb:.2f} €, PDF {erg['brutto'] or erg['netto']:.2f} € – bitte prüfen".replace(".", ",")
+        else:
+            erg.update(brutto=nb, netto=round(nb / 1.19, 2),
+                       hinweis="Betrag aus Dateiname (Brutto), Netto mit 19 % geschätzt")
+    # Abschlags-/Schlussrechnungen nie automatisch zählen
+    if re.search(ABSCHLUSS, f"{betreff} {dateiname} {text or ''}".lower()) and erg["status"] == "sicher":
+        erg["status"] = "pruefen"
+        erg["hinweis"] = "Abschlags-/Schlussrechnung – bitte prüfen, ob Abschläge doppelt zählen" + \
+                         (f" ({erg['hinweis']})" if erg["hinweis"] else "")
+    return erg
+
+
+def _betrag_aus_pdf(text):
     erg = {"netto": None, "mwst": None, "brutto": None, "nr": None, "status": "pruefen", "hinweis": None}
     if not text or len(text.strip()) < 20:
         erg["hinweis"] = "kein lesbarer Text (evtl. Scan)"
@@ -449,13 +479,43 @@ def diagnose(anzahl=30):
     print(f"Diagnose: {zeilen_gesamt} Beispiele in geschützte Tabelle geschrieben")
 
 
+def eigene_markieren(stat):
+    """Andys eigene Kundenrechnungen in den Projektordnern → status 'eigene' (zählen nicht als Kosten)."""
+    muster = urllib.parse.quote(r"^(rechnung|gutschrift|schlussrechnung|stornorechnung)[[:space:]]*[0-9]{4}-[0-9]{2}([_[:space:].]|$)",
+                                safe="")
+    res = sb_request("PATCH", f"/rest/v1/eingangsrechnungen?status=eq.neu&dateiname=imatch.{muster}",
+                     body={"status": "eigene", "aktualisiert_am": jetzt()}, headers={"Prefer": "return=representation"})
+    stat["eigene"] = stat.get("eigene", 0) + len(res or [])
+
+
+def doppelte_markieren(stat):
+    """Eindeutig doppelte Rechnungen (gleiches Projekt + gleicher Betrag + gleiche Rechnungsnummer oder gleiche Datei)
+    zählen nur einmal: die ältere bleibt, die weiteren bekommen status 'doppelt' (bleiben sichtbar)."""
+    rows = sb_select_all("eingangsrechnungen", "id,projekt_id,betrag_netto,rechnungsnummer,groesse_bytes",
+                         "&status=eq.neu&betrag_netto=not.is.null&order=id")
+    gesehen, doppelt = set(), []
+    for r in rows:
+        schluessel = []
+        if r["rechnungsnummer"]:
+            schluessel.append(("nr", r["projekt_id"], r["betrag_netto"], r["rechnungsnummer"].lower()))
+        if r["groesse_bytes"]:
+            schluessel.append(("datei", r["projekt_id"], r["betrag_netto"], r["groesse_bytes"]))
+        if any(s in gesehen for s in schluessel):
+            doppelt.append(r["id"])
+        gesehen.update(schluessel)
+    for rid in doppelt:
+        sb_request("PATCH", f"/rest/v1/eingangsrechnungen?id=eq.{int(rid)}",
+                   body={"status": "doppelt", "aktualisiert_am": jetzt()})
+    stat["doppelt"] = stat.get("doppelt", 0) + len(doppelt)
+
+
 def betraege_auslesen(stat, maximal=1500):
     """Liest für alle Rechnungen ohne Betrag-Status den Betrag aus dem PDF."""
-    offen = sb_select_all("eingangsrechnungen", "id,storage_pfad",
+    offen = sb_select_all("eingangsrechnungen", "id,storage_pfad,betreff,dateiname",
                           "&betrag_status=is.null&status=eq.neu&storage_pfad=not.is.null&order=id")
     for r in offen[:maximal]:
         try:
-            erg = betrag_aus_text(pdf_text(sb_download_pdf(r["storage_pfad"])))
+            erg = betrag_aus_text(pdf_text(sb_download_pdf(r["storage_pfad"])), r["betreff"] or "", r["dateiname"] or "")
         except Exception as e:  # noqa: BLE001 – defektes PDF o. ä.
             erg = {"netto": None, "mwst": None, "brutto": None, "nr": None, "status": "pruefen",
                    "hinweis": f"PDF nicht lesbar ({type(e).__name__})"}
@@ -597,9 +657,11 @@ def main(nur_ordner=False):
             except Exception:
                 pass
 
-        # Teil D: Beträge aus neuen PDFs lesen
+        # Teil D: eigene Rechnungen aussortieren, Beträge aus neuen PDFs lesen, Doppelte markieren
         if not nur_ordner:
+            eigene_markieren(stat)
             betraege_auslesen(stat)
+            doppelte_markieren(stat)
 
         # Bestätigte Zuordnungen auf alle Rechnungen des Ordners anwenden (z. B. nach Änderung in der App)
         for ordner in mapping:
@@ -621,7 +683,8 @@ def main(nur_ordner=False):
           f"(bestätigt: {stat['bestaetigt']}, offen: {stat['offen']}, ignoriert: {stat['ignoriert']}, neu erfasst: {stat['neue_ordner']}) | "
           f"Mails geprüft: {stat['mails']} | neue Rechnungen (PDFs): {stat['neue_rechnungen']} | "
           f"Mails ohne PDF: {stat['ohne_pdf']} | verschoben: {stat['verschoben']} | "
-          f"Beträge sicher: {stat.get('betrag_sicher', 0)}, bitte prüfen: {stat.get('betrag_pruefen', 0)}")
+          f"Beträge sicher: {stat.get('betrag_sicher', 0)}, bitte prüfen: {stat.get('betrag_pruefen', 0)} | "
+          f"eigene Rechnungen: {stat.get('eigene', 0)}, doppelte: {stat.get('doppelt', 0)}")
     return 1 if fehler else 0
 
 
@@ -704,13 +767,27 @@ def selbsttest():
     e = betrag_aus_text("3. Abschlagsrechnung Beispielbau\nGesamtleistung netto 50.000,00\nMwSt 19% 9.500,00\n"
                         "Gesamt brutto 59.500,00\nabzüglich bisherige Abschläge 47.600,00\nzu zahlen 11.900,00")
     assert e["status"] == "pruefen" and "Abschlag" in e["hinweis"], e  # Gesamtleistung darf NICHT sicher zählen
+    # Abschlags-/Schlussrechnungen: Betrag wird erkannt, aber immer „bitte prüfen“ (Vorgabe Andy)
     e = betrag_aus_text("Abschlagsrechnung Nr. 3 Beispielbau\nNetto 10.000,00\nMwSt 1.900,00\nzu zahlen 11.900,00")
-    assert (e["status"], e["netto"]) == ("sicher", 10000.0), e
+    assert (e["status"], e["netto"]) == ("pruefen", 10000.0), e
     e = betrag_aus_text("Beispiel Fenster GmbH\nZwischensumme 1.985,00\nÜbertrag 1.985,00\nGesamtbetrag* 2.359,40\n"
                         "*Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)\n"
                         "Abzüglich erhaltener Abschlagszahlungen Brutto €\n1. Anzahlungsrechnung vom 01.09.2026 -1.179,70\n"
                         "Forderungsbetrag* 1.179,70")
-    assert (e["status"], e["netto"], e["mwst"]) == ("sicher", 1179.7, 0.0), e  # §13b: nur Forderungsbetrag
+    assert (e["status"], e["netto"], e["mwst"]) == ("pruefen", 1179.7, 0.0), e  # §13b: Vorschlag Forderungsbetrag
+    e = betrag_aus_text("Rechnung Beispiel GmbH\nNetto 100,00\nMwSt 19,00\nBrutto 119,00", "Schlussrechnung BV Muster", "SR.pdf")
+    assert e["status"] == "pruefen", e  # Schlussrechnung nur im Betreff erkannt
+    # Betrag im Dateinamen als Abgleich
+    e = betrag_aus_text("BEISPIELMARKT\nSUMME EUR 78,94\nenthaltene MwSt 19% 12,60", "", "Beispielmarkt 28.07.26 78,94€ Muster.pdf")
+    assert e["status"] == "sicher" and "Dateiname bestätigt" in e["hinweis"], e
+    e = betrag_aus_text("BEISPIELMARKT\nSUMME EUR 78,94\nenthaltene MwSt 19% 12,60", "", "Beispielmarkt 13,38€.pdf")
+    assert e["status"] == "pruefen" and "Dateiname nennt" in e["hinweis"], e  # Widerspruch → prüfen
+    e = betrag_aus_text("", "", "Beispielmarkt 10.09.26 39,98€ Muster.pdf")  # Scan ohne Text
+    assert (e["status"], e["brutto"], e["netto"]) == ("pruefen", 39.98, 33.6), e
+    # Andys eigene Rechnungen am Dateinamen erkennen (ausgedachte Beispiele)
+    assert EIGENE_RE.match("Rechnung 4999-26_Musterkunde_Musterstraße 1.pdf")
+    assert EIGENE_RE.match("Schlussrechnung 5001-27_Beispiel SR.pdf")
+    assert not EIGENE_RE.match("Rechnung_00108_26.pdf") and not EIGENE_RE.match("Rechnung Beispiel 2260993 2008,13 €.pdf")
     e = betrag_aus_text("Beispielhersteller\nWarenwert : 216,60 EUR\n19,00 % MwSt. : 41,15 EUR\nRechnungswert : 257,75 EUR")
     assert (e["status"], e["netto"]) == ("sicher", 216.6), e
 
@@ -719,12 +796,15 @@ def selbsttest():
 
 
 def neu_auslesen():
-    """Liest alle automatisch als „bitte prüfen“ markierten Beträge neu aus (von Andy Bestätigtes bleibt unberührt)."""
-    sb_request("PATCH", "/rest/v1/eingangsrechnungen?betrag_status=eq.pruefen",
-               body={"betrag_status": None, "aktualisiert_am": jetzt()})
+    """Liest alle automatisch ermittelten Beträge neu aus (von Andy Bestätigtes oder von Hand Erfasstes bleibt unberührt)."""
+    sb_request("PATCH", "/rest/v1/eingangsrechnungen?betrag_status=in.(sicher,pruefen)&status=in.(neu,doppelt)",
+               body={"betrag_status": None, "status": "neu", "aktualisiert_am": jetzt()})
     stat = {}
+    eigene_markieren(stat)
     betraege_auslesen(stat)
-    print(f"Neu ausgelesen | Beträge sicher: {stat.get('betrag_sicher', 0)}, bitte prüfen: {stat.get('betrag_pruefen', 0)}")
+    doppelte_markieren(stat)
+    print(f"Neu ausgelesen | Beträge sicher: {stat.get('betrag_sicher', 0)}, bitte prüfen: {stat.get('betrag_pruefen', 0)} | "
+          f"eigene Rechnungen: {stat.get('eigene', 0)}, doppelte: {stat.get('doppelt', 0)}")
     return 0
 
 
