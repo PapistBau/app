@@ -367,6 +367,15 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 /* CONTROLLING */
 .ctrl-proj-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);margin-bottom:14px;overflow:hidden;}
 .ctrl-proj-header{padding:16px 18px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+/* Projektkarte im Controlling: Einnahmen / Kosten / Ergebnis */
+.cp-block{border-top:1px solid var(--border);}
+.cp-block-head{padding:12px 18px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.cp-block-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+.cp-block-title span{color:var(--t2);font-weight:400;text-transform:none;letter-spacing:0;}
+.cp-zeile{padding:6px 18px;display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:14px;}
+.cp-hinweis{font-size:12px;color:var(--t2);}
+.cp-betrag{font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--red);white-space:nowrap;}
+.cp-leer{padding:4px 18px 12px;font-size:13px;color:var(--t2);}
 .ctrl-proj-name{font-weight:700;font-size:15px;flex:1;min-width:0;}
 .ctrl-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;padding:16px 18px;}
 .ctrl-kpi{text-align:center;background:var(--card2);border-radius:var(--r2);padding:12px 8px;}
@@ -1116,7 +1125,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   <div class="tabbar" style="margin-bottom:20px">
     <div class="tab active" onclick="switchCtrlTab(this,'ctrl-tab-jahr')">📅 Jahresübersicht</div>
     <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-projekte')">🏗 Je Projekt</div>
-    <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-rechnungen')">🧾 Rechnungen</div>
+    <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-rechnungen')">🧾 Kundenrechnungen</div>
     <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-ordner')">📥 Rechnungsordner</div>
   </div>
   <div class="tabcontent active" id="ctrl-tab-jahr">
@@ -2223,34 +2232,47 @@ function renderControlling(){
       </div>
       <div class="ctrl-kpi-row">
         <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--accent)">${auftragsNetto?num(auftragsNetto)+' €':'–'}</div><div class="ctrl-kpi-lbl">Auftragssumme Netto</div></div>
-        <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--green)">${num(rechBezP)} €</div><div class="ctrl-kpi-lbl">Eingenommen</div></div>
-        <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:${rechOffP>0?'var(--orange)':'var(--t2)'}">${num(rechOffP)} €</div><div class="ctrl-kpi-lbl">Ausstehend</div></div>
-        <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--red)">${num(matNetto)} €</div><div class="ctrl-kpi-lbl">Material Netto</div></div>
-        <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--blue)">${stundP} h</div><div class="ctrl-kpi-lbl">Stunden</div></div>
-        ${lohnP?`<div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--red)">${num(lohnP)} €</div><div class="ctrl-kpi-lbl">Lohnkosten</div></div>`:''}
-        ${pER.length?`<div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--red)">${erNetto?num(erNetto)+' €':pER.length}</div><div class="ctrl-kpi-lbl">${erNetto?'Eingangsrechnungen Netto':'Eingangsrechnungen'}</div></div>`:''}
-        <div class="ctrl-kpi"><div class="ctrl-kpi-val">${pRech.length}</div><div class="ctrl-kpi-lbl">Rechnungen</div></div>
-        ${deckungsBeitrag!==null?`<div class="ctrl-kpi" style="background:${deckungsBeitrag>=0?'rgba(63,185,80,.1)':'rgba(248,81,73,.1)'};border:1px solid ${deckungsBeitrag>=0?'rgba(63,185,80,.2)':'rgba(248,81,73,.2)'}"><div class="ctrl-kpi-val" style="color:${deckungsBeitrag>=0?'var(--green)':'var(--red)'}">${num(deckungsBeitrag)} €</div><div class="ctrl-kpi-lbl">Deckungsbeitrag</div></div>`:''}
-        ${deckung?`<div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:${deckung>=100?'var(--green)':'var(--accent)'}">${deckung}%</div><div class="ctrl-kpi-lbl">Deckungsgrad</div></div>`:''}
         ${p.prog?`<div class="ctrl-kpi"><div class="ctrl-kpi-val">${p.prog}%</div><div class="ctrl-kpi-lbl">Fortschritt</div></div>`:''}
       </div>
-      ${matNetto>0?`
-      <div style="padding:0 18px 12px">
-        <div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🧱 Material</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          ${pMat.slice(0,5).map(m=>`
-            <div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px">
-              <span style="font-weight:600">${m.lieferant}</span>
-              <span style="color:var(--red);font-family:'Bebas Neue',sans-serif;font-size:16px;margin-left:8px">${num(m.netto)} €</span>
-            </div>`).join('')}
-          ${pMat.length>5?`<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--t2)">+${pMat.length-5} weitere</div>`:''}
+
+      <!-- 💶 EINNAHMEN: Rechnungen an den Kunden -->
+      <div class="cp-block">
+        <div class="cp-block-head">
+          <div class="cp-block-title" style="color:var(--green)">💶 Einnahmen <span>· Rechnungen an den Kunden</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="openRechModal(${p.id})">＋ Kundenrechnung erfassen</button>
+            <label class="btn btn-blue btn-sm" style="cursor:pointer">
+              📎 PDF hochladen
+              <input type="file" accept=".pdf" multiple style="display:none" onchange="handleCtrlPdfUpload(event,${p.id})">
+            </label>
+          </div>
         </div>
-      </div>`:''}
-      ${renderEingangsReSection(p, pER, erNetto, erOhneBetrag)}
-      ${stundP>0?`
-      <div style="padding:0 18px 10px">
-        <div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Stunden je Mitarbeiter</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <div class="ctrl-kpi-row" style="padding-top:0">
+          <div class="ctrl-kpi"><div class="ctrl-kpi-val">${num(rechSum)} €</div><div class="ctrl-kpi-lbl">Gestellt (${pRech.length})</div></div>
+          <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--green)">${num(rechBezP)} €</div><div class="ctrl-kpi-lbl">Bezahlt</div></div>
+          <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:${rechOffP>0?'var(--orange)':'var(--t2)'}">${num(rechOffP)} €</div><div class="ctrl-kpi-lbl">Offen</div></div>
+          ${deckung?`<div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:${deckung>=100?'var(--green)':'var(--accent)'}">${deckung}%</div><div class="ctrl-kpi-lbl">vom Auftrag bezahlt</div></div>`:''}
+        </div>
+        ${pRech.length?`
+        <div style="overflow-x:auto">
+          <table class="ctrl-table">
+            <thead><tr><th>Nr.</th><th>Datum</th><th>Beschreibung</th><th>Brutto</th><th>Netto</th><th>Status</th><th></th></tr></thead>
+            <tbody>${rechRows}</tbody>
+          </table>
+        </div>`:`<div class="cp-leer">Noch keine Kundenrechnung für dieses Projekt</div>`}
+      </div>
+
+      <!-- 🧱 KOSTEN: Lohn, Material, Eingangsrechnungen -->
+      <div class="cp-block">
+        <div class="cp-block-head">
+          <div class="cp-block-title" style="color:var(--red)">🧱 Kosten</div>
+        </div>
+        <div class="cp-zeile">
+          <div><b>Lohn</b> <span class="cp-hinweis">${stundP} h</span></div>
+          <div class="cp-betrag">${lohnP?num(lohnP)+' €':'–'}</div>
+        </div>
+        ${stundP>0?`
+        <div style="padding:0 18px 10px;display:flex;flex-wrap:wrap;gap:8px">
           ${Object.entries(byMa).sort((a,b)=>b[1]-a[1]).map(([wid,h])=>{
             const w=workers.find(x=>x.id==wid); const wi2=workers.indexOf(w);
             const ini=w?(w.vorname[0]+w.nachname[0]).toUpperCase():'?';
@@ -2260,32 +2282,31 @@ function renderControlling(){
               <span style="font-family:'Bebas Neue';font-size:18px;color:var(--accent)">${h} h</span>
             </div>`;
           }).join('')}
+        </div>`:''}
+        <div class="cp-zeile">
+          <div><b>Material</b> <span class="cp-hinweis">von Hand erfasst${pMat.length?' · '+pMat.length+' Belege':''}</span></div>
+          <div class="cp-betrag">${matNetto?num(matNetto)+' €':'–'}</div>
         </div>
-      </div>`:''}
-      ${pRech.length?`
-      <div style="border-top:1px solid var(--border)">
-        <div style="padding:12px 18px 8px;display:flex;align-items:center;justify-content:space-between">
-          <div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px">🧾 Rechnungen</div>
-          <label class="btn btn-blue btn-sm" style="cursor:pointer">
-            📎 PDF hochladen
-            <input type="file" accept=".pdf" multiple style="display:none" data-projid="${p.id}" onchange="handleCtrlPdfUpload(event,${p.id})">
-          </label>
+        ${pMat.length?`
+        <div style="padding:0 18px 10px;display:flex;flex-wrap:wrap;gap:8px">
+          ${pMat.slice(0,5).map(m=>`
+            <div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px">
+              <span style="font-weight:600">${m.lieferant}</span>
+              <span style="color:var(--red);font-family:'Bebas Neue',sans-serif;font-size:16px;margin-left:8px">${num(m.netto)} €</span>
+            </div>`).join('')}
+          ${pMat.length>5?`<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--t2)">+${pMat.length-5} weitere</div>`:''}
+        </div>`:''}
+        ${renderEingangsReSection(p, pER, erNetto, erOhneBetrag)}
+      </div>
+
+      <!-- 📊 ERGEBNIS -->
+      <div class="cp-block">
+        <div class="cp-zeile" style="padding-top:12px">
+          <div><b>📊 Deckungsbeitrag</b> <span class="cp-hinweis">Auftragssumme − Lohn − Material − Eingangsrechnungen</span></div>
+          <div class="cp-betrag" style="color:${deckungsBeitrag===null?'var(--t2)':deckungsBeitrag>=0?'var(--green)':'var(--red)'}">${deckungsBeitrag===null?'– (keine Auftragssumme)':num(deckungsBeitrag)+' €'}</div>
         </div>
-        <div style="overflow-x:auto">
-          <table class="ctrl-table">
-            <thead><tr><th>Nr.</th><th>Datum</th><th>Beschreibung</th><th>Brutto</th><th>Netto</th><th>Status</th><th></th></tr></thead>
-            <tbody>${rechRows}</tbody>
-          </table>
-        </div>
-      </div>`:`
-      <div style="padding:14px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:12px">
-        <span style="color:var(--t2);font-size:13px">Noch keine Rechnungen für dieses Projekt</span>
-        <button class="btn btn-primary btn-sm" onclick="openRechModal(${p.id})">＋ Rechnung erfassen</button>
-        <label class="btn btn-blue btn-sm" style="cursor:pointer">
-          📎 PDF hochladen
-          <input type="file" accept=".pdf" multiple style="display:none" onchange="handleCtrlPdfUpload(event,${p.id})">
-        </label>
-      </div>`}
+        ${erOhneBetrag?`<div class="cp-leer" style="padding-top:0">⚠ ${erOhneBetrag} Eingangsrechnung${erOhneBetrag!==1?'en':''} noch ohne Betrag – Ergebnis noch nicht vollständig</div>`:''}
+      </div>
     </div>`;
   }).join('') : '<div class="empty"><div class="empty-ico">🏗</div><div class="empty-ttl">Keine aktiven Projekte in diesem Jahr</div></div>';
 
@@ -2395,15 +2416,14 @@ function renderEingangsReSection(p, pER, erNetto, erOhneBetrag){
       </td>
     </tr>`;
   }).join('');
-  return`<div style="border-top:1px solid var(--border)">
-    <div style="padding:12px 18px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-      <div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px">
-        📥 Eingangsrechnungen (${pER.length})${erNetto?` · ${num(erNetto)} € netto`:''}${pER.length&&erOhneBetrag?` · <span style="text-transform:none;font-weight:400">${erOhneBetrag} ohne Betrag</span>`:''}
-      </div>
-      <div style="display:flex;gap:8px">
-        ${pER.length?`<button class="btn btn-ghost btn-sm" onclick="toggleEingangsRe('${pid}')">${offen?'▲ Ausblenden':'▼ Anzeigen'}</button>`:''}
-        <button class="btn btn-primary btn-sm" onclick="openEingangsReModal(${p.id})">＋ Hinzufügen</button>
-      </div>
+  return`<div>
+    <div class="cp-zeile">
+      <div><b>Eingangsrechnungen</b> <span class="cp-hinweis">Lieferanten & Subunternehmer · ${pER.length} Stück${pER.length&&erOhneBetrag?` · ${erOhneBetrag} ohne Betrag`:''}</span></div>
+      <div class="cp-betrag">${erNetto?num(erNetto)+' €':'–'}</div>
+    </div>
+    <div style="padding:0 18px 10px;display:flex;gap:8px;flex-wrap:wrap">
+      ${pER.length?`<button class="btn btn-ghost btn-sm" onclick="toggleEingangsRe('${pid}')">${offen?'▲ Liste ausblenden':'▼ Liste anzeigen'}</button>`:''}
+      <button class="btn btn-primary btn-sm" onclick="openEingangsReModal(${p.id})">＋ Eingangsrechnung hinzufügen</button>
     </div>
     ${pER.length&&offen?`<div style="overflow-x:auto;padding:0 0 8px">
       <table class="ctrl-table">
