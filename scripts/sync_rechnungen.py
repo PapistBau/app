@@ -274,7 +274,8 @@ LABELS = {
               r"gesamtsumme|summe\s+brutto|\btotal\b|zahlbar|summe\s+inkl|betrag\s+inkl|rechnungswert|forderungsbetrag|"
               r"\bsumme\b(?!\s+(?:netto|ohne|der\s+positionen))",
 }
-ZU_ZAHLEN = r"zu\s+zahlen|zahlbetrag|zahlbar|auszahlungsbetrag|restbetrag|forderungsbetrag"
+ZU_ZAHLEN = (r"zu\s+zahlen|zahlbetrag|zahlbar|auszahlungsbetrag|restbetrag|restforderung|forderungsbetrag|\bforderung\b|"
+             r"offener\s+betrag|noch\s+offen")
 ABSCHLAG = (r"abschlag|abzügl|abzgl|bereits\s+(?:gezahlt|bezahlt|berechnet)|bisher\s+(?:gezahlt|berechnet|abgerechnet)|"
             r"teilzahlung|anzahlung")
 NR_RE = re.compile(r"(?:rechnungs?\s*-?\s*(?:nr|nummer)|rg\.?\s*-?\s*nr|beleg\s*-?\s*nr)\.?\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9\-/._]{2,30})",
@@ -322,14 +323,73 @@ def kandidaten(text):
     return gefunden
 
 
-# Abschlags-/Schlussrechnungen: immer prüfen (Vorgabe Andy), damit Abschläge nicht doppelt zählen
-ABSCHLUSS = r"abschlag|schlussrechnung|schlußrechnung|teilrechnung|anzahlung"
 # Andys eigene Kundenrechnungen (Nummernkreis z. B. „Rechnung 4436-26_…“) sind keine Kosten (Vorgabe Andy)
 EIGENE_RE = re.compile(r"^(?:rechnung|gutschrift|schlussrechnung|stornorechnung)\s*\d{4}-\d{2}(?:[_\s.]|$)", re.IGNORECASE)
 
+# ── Belegart, Belegnummer, Lieferant (für die Verrechnung von Abschlägen/Schlussrechnungen) ──
+# Belegart nach der Überschrift: das Stichwort, das im Kopf des PDFs ZUERST vorkommt, gewinnt
+# (eine Auftragsbestätigung kann weiter unten „Anzahlung 50 %“ erwähnen, eine Schlussrechnung „abzgl. Abschlag“).
+ART_MUSTER = {
+    "schluss": r"schlussrechnung|schlußrechnung|schluss-rechnung|schlussabrechnung|endabrechnung",
+    "korrektur": r"rechnungskorrektur|stornorechnung|\bstorno\b",
+    "gutschrift": r"gutschrift",
+    "abschlag": r"abschlagsrechnung|anzahlungsrechnung|\banzahlung\b|teilrechnung|vorausrechnung|\b\d\.\s*az\b|\babschlag\b",
+    "kein_beleg": r"auftragsbest(?:ä|ae)tigung|\bfreigabe\b|\bangebot\b|lieferschein|kostenvoranschlag",
+}
+AB_DATEINAME = r"(?:^|[\s_\-])ab(?:[\s_\-.]|$)"   # „7301359 AB Papist.pdf“
+USTID_RE = re.compile(r"\bDE\s?\d{3}\s?\d{3}\s?\d{3}\b")
+STNR_RE = re.compile(r"\b\d{2,3}/\d{3}/\d{4,5}\b")
+NUMMER_RE = re.compile(r"[A-Za-z]{0,4}\s?\d[\d./\-]{3,22}\d")
+DATUM_RE = re.compile(r"^\d{1,2}\.\d{1,2}\.\d{2,4}$")
+BELEGNR_RE = re.compile(r"(?:rechnung|schlussrechnung|anzahlungsrechnung|abschlagsrechnung|gutschrift|korrektur|beleg|storno)\w*"
+                        r"\s*[-.]?\s*(?:nr\.?|nummer|no\.?)?\s*[:#]?\s*((?:[A-Z]{1,4}\s?)?\d[\d/.\-]{3,20}\d)", re.IGNORECASE)
+
+
+def ziffern(s):
+    return re.sub(r"\D", "", s or "")
+
+
+def beleg_art(text, betreff="", dateiname=""):
+    kopf = "\n".join([z for z in (text or "").splitlines() if z.strip()][:15]).lower()
+    for quelle in (kopf, (dateiname or "").lower(), (betreff or "").lower()):
+        treffer = [(m.start(), art) for art, muster in ART_MUSTER.items() for m in [re.search(muster, quelle)] if m]
+        if quelle is not kopf and re.search(AB_DATEINAME, quelle):
+            treffer.append((-1, "kein_beleg"))
+        if treffer:
+            return min(treffer)[1]
+    return "rechnung"
+
+
+def beleg_nummer(text, betreff="", dateiname=""):
+    """Eigene Belegnummer, nur Ziffern (mind. 5). Zuerst aus der Überschrift, sonst aus Betreff/Dateiname."""
+    kopf = "\n".join([z for z in (text or "").splitlines() if z.strip()][:40])
+    for m in BELEGNR_RE.finditer(kopf):
+        roh = m.group(1).strip()
+        if not DATUM_RE.match(roh.split()[-1]) and len(ziffern(roh)) >= 5:
+            return ziffern(roh)
+    for quelle in (betreff or "", dateiname or ""):
+        for m in NUMMER_RE.finditer(quelle):
+            roh = m.group(0).strip()
+            if not DATUM_RE.match(re.sub(r"^[A-Za-z]+\s?", "", roh)) and len(ziffern(roh)) >= 6:
+                return ziffern(roh)
+    return None
+
+
+def genannte_nummern(text):
+    """Alle im PDF genannten Nummern (nur Ziffern, mind. 5), z. B. die Abzugsliste einer Schlussrechnung."""
+    return sorted({ziffern(m.group(0)) for m in NUMMER_RE.finditer(text or "") if len(ziffern(m.group(0))) >= 5})
+
+
+def steuer_ids(text):
+    ids = [re.sub(r"\s", "", m.group(0)) for m in USTID_RE.finditer(text or "")]
+    ids += [m.group(0) for m in STNR_RE.finditer(text or "")]
+    return list(dict.fromkeys(ids))
+
 
 def betrag_aus_text(text, betreff="", dateiname=""):
-    """Liefert dict mit netto, mwst, brutto, nr, status ('sicher'/'pruefen') und hinweis."""
+    """Liefert dict mit netto (Betrag dieses Belegs), gesamt (Gesamtleistung), zahl (Zahlbetrag netto),
+    mwst, brutto, nr, status ('sicher'/'pruefen') und hinweis. Die Verrechnung von Abschlägen mit
+    Schlussrechnungen passiert danach je Projekt in verrechne_projekt()."""
     erg = _betrag_aus_pdf(text)
     # Betrag im Dateinamen (Andy schreibt ihn oft hinein, z. B. „OBI 28.07.26 78,94€ Husel.pdf“) als Abgleich
     namens_betraege = [zahl(b.group(0)) for b in BETRAG_RE.finditer(dateiname or "")]
@@ -345,16 +405,12 @@ def betrag_aus_text(text, betreff="", dateiname=""):
         else:
             erg.update(brutto=nb, netto=round(nb / 1.19, 2),
                        hinweis="Betrag aus Dateiname (Brutto), Netto mit 19 % geschätzt")
-    # Abschlags-/Schlussrechnungen nie automatisch zählen
-    if re.search(ABSCHLUSS, f"{betreff} {dateiname} {text or ''}".lower()) and erg["status"] == "sicher":
-        erg["status"] = "pruefen"
-        erg["hinweis"] = "Abschlags-/Schlussrechnung – bitte prüfen, ob Abschläge doppelt zählen" + \
-                         (f" ({erg['hinweis']})" if erg["hinweis"] else "")
     return erg
 
 
 def _betrag_aus_pdf(text):
-    erg = {"netto": None, "mwst": None, "brutto": None, "nr": None, "status": "pruefen", "hinweis": None}
+    erg = {"netto": None, "mwst": None, "brutto": None, "nr": None, "status": "pruefen", "hinweis": None,
+           "gesamt": None, "zahl": None}
     if not text or len(text.strip()) < 20:
         erg["hinweis"] = "kein lesbarer Text (evtl. Scan)"
         return erg
@@ -364,8 +420,10 @@ def _betrag_aus_pdf(text):
     klein = text.lower()
     k = kandidaten(text)
     netto_k, mwst_k, brutto_k = set(k["netto"]), set(k["mwst"]), set(k["brutto"])
-    zu_zahlen = set(k["zu_zahlen"])
+    zu_zahlen = {z for z in k["zu_zahlen"] if z >= 0}
     abschlag = re.search(ABSCHLAG, klein) is not None
+    p13b = "13b" in klein or "steuerschuldnerschaft" in klein or "reverse charge" in klein
+    gleich = {x for x in netto_k & brutto_k if x > 0}   # Netto = Brutto beschriftet → ohne MwSt
 
     def stimmt(n, b):
         return any(abs(n * (1 + s) - b) <= max(0.02, b * 0.0002) for s in (0.19, 0.07))
@@ -382,8 +440,9 @@ def _betrag_aus_pdf(text):
             if 0 < m < b and stimmt(round(b - m, 2), b):
                 passend.append((b, round(b - m, 2)))
     # 3) Dreier-Probe: Netto, MwSt und Brutto stehen als Zahlen irgendwo und passen genau zusammen
+    #    (nicht bei Belegen ohne MwSt – dort würden Positionszeilen fälschlich als Summe erkannt)
     quelle = "beschriftet"
-    if not passend:
+    if not passend and not gleich and not p13b:
         alle = sorted(x for x in alle_betraege(text) if x > 0)
         alle_set = set(alle)
         for n in alle:
@@ -395,41 +454,44 @@ def _betrag_aus_pdf(text):
         quelle = "Dreier-Probe"
 
     if passend:
-        # Bei Abschlags-/Teilrechnungen steht oft die Gesamtleistung als größte Summe darauf.
-        # Dann nur „sicher“, wenn die Kombination genau dem Betrag unter „zu zahlen“ entspricht.
-        if abschlag:
-            treffer = [(b, n) for b, n in passend if b in zu_zahlen]
-            if len({b for b, _ in treffer}) == 1:
-                b, n = treffer[0]
-                erg.update(netto=n, brutto=b, mwst=round(b - n, 2), status="sicher",
-                           hinweis="Abschlagsrechnung: Betrag „zu zahlen“")
-            else:
-                b, n = min(passend)
-                erg.update(netto=n, brutto=b, mwst=round(b - n, 2),
-                           hinweis="Abschlags-/Teilrechnung – welcher Betrag gilt? bitte prüfen")
+        gb, gn = max(passend)
+        erg["gesamt"] = gn
+        # Zahlbetrag netto (bei Abschlags-/Schlussrechnungen: was mit DIESEM Beleg zu zahlen ist)
+        zp = [(b, n) for b, n in passend if b in zu_zahlen]
+        if zp:
+            erg["zahl"] = min(zp)[1]
+        elif len(zu_zahlen) == 1:
+            erg["zahl"] = round(next(iter(zu_zahlen)) * gn / gb, 2)   # Zahlbetrag steht brutto da
+        if abschlag and erg["zahl"] is not None and erg["zahl"] > 0:
+            n = erg["zahl"]
+            b = round(n * gb / gn, 2)
+            erg.update(netto=n, brutto=b, mwst=round(b - n, 2), status="sicher", hinweis="Betrag dieser Rechnung („zu zahlen“)")
+        elif abschlag:
+            b, n = min(passend)
+            erg.update(netto=n, brutto=b, mwst=round(b - n, 2),
+                       hinweis="Abschlags-/Teilrechnung – welcher Betrag gilt? bitte prüfen")
         else:
-            b, n = max(passend)
-            erg.update(netto=n, brutto=b, mwst=round(b - n, 2), status="sicher",
+            erg.update(netto=gn, brutto=gb, mwst=round(gb - gn, 2), status="sicher",
                        hinweis=None if quelle == "beschriftet" else "Summen per Dreier-Probe erkannt")
     else:
-        # 2) §13b: keine MwSt, Netto = Rechnungsbetrag
-        p13b = "13b" in klein or "steuerschuldnerschaft" in klein or "reverse charge" in klein
-        endbetraege = sorted(netto_k | brutto_k)
-        if p13b and endbetraege and abschlag:
-            # §13b-Schlussrechnung mit abgezogenen Anzahlungen: es zählt nur der noch zu zahlende Betrag,
-            # die Anzahlungsrechnungen sind selbst schon erfasst (sonst doppelt)
+        endbetraege = sorted(x for x in netto_k | brutto_k if x > 0)
+        if gleich or (p13b and endbetraege):
+            # ohne MwSt (§13b oder Summenzeile mit 0 % MwSt): Netto = Brutto.
+            # Gesamtleistung = größter beschrifteter Betrag (bei Schlussrechnungen steht der Restbetrag kleiner darunter)
+            gesamt = max(endbetraege)
+            erg["gesamt"] = gesamt
             if len(zu_zahlen) == 1:
-                wert = next(iter(zu_zahlen))
-                erg.update(netto=wert, brutto=wert, mwst=0.0, status="sicher",
-                           hinweis="§13b, abzüglich Anzahlungen: Forderungsbetrag")
+                erg["zahl"] = next(iter(zu_zahlen))
+            art = "§13b (ohne MwSt)" if p13b else "ohne MwSt (Netto = Brutto)"
+            if abschlag and erg["zahl"] is not None and erg["zahl"] > 0:
+                erg.update(netto=erg["zahl"], status="sicher", hinweis=f"{art}, Betrag dieser Rechnung")
+            elif abschlag:
+                erg.update(netto=min(endbetraege), hinweis=f"{art}, mit Abschlägen – welcher Betrag gilt? bitte prüfen")
+            elif gleich or len(endbetraege) == 1:
+                erg.update(netto=gesamt, status="sicher", hinweis=art)
             else:
-                erg.update(netto=min(endbetraege), hinweis="§13b mit Anzahlungen – welcher Betrag gilt? bitte prüfen")
-        elif p13b and endbetraege:
-            if len(endbetraege) == 1 or (netto_k & brutto_k):
-                wert = max(netto_k & brutto_k) if netto_k & brutto_k else endbetraege[0]
-                erg.update(netto=wert, brutto=wert, mwst=0.0, status="sicher", hinweis="§13b (ohne MwSt)")
-            else:
-                erg.update(netto=max(endbetraege), hinweis="§13b, mehrere mögliche Beträge")
+                erg.update(netto=max(endbetraege), hinweis=f"{art}, mehrere mögliche Beträge")
+            erg.update(brutto=erg["netto"], mwst=0.0)
         elif brutto_k:
             b = max(brutto_k)
             erg.update(brutto=b, netto=round(b / 1.19, 2), hinweis="nur Bruttobetrag gefunden, Netto mit 19 % geschätzt")
@@ -488,39 +550,186 @@ def eigene_markieren(stat):
     stat["eigene"] = stat.get("eigene", 0) + len(res or [])
 
 
-def doppelte_markieren(stat):
-    """Eindeutig doppelte Rechnungen (gleiches Projekt + gleicher Betrag + gleiche Rechnungsnummer oder gleiche Datei)
-    zählen nur einmal: die ältere bleibt, die weiteren bekommen status 'doppelt' (bleiben sichtbar)."""
-    rows = sb_select_all("eingangsrechnungen", "id,projekt_id,betrag_netto,rechnungsnummer,groesse_bytes",
-                         "&status=eq.neu&betrag_netto=not.is.null&order=id")
-    gesehen, doppelt = set(), []
+# ════════════════════════════════════
+# Verrechnung je Projekt (Abschläge ↔ Schlussrechnung, Duplikate, Korrekturen)
+# ════════════════════════════════════
+# Abgestimmt mit Andy am 31.10.2026 und an echten Fällen unabhängig nachgerechnet:
+#  1. Lieferant über USt-IdNr./Steuernummer im PDF (Andys eigene Nummer wird ignoriert), sonst Absender-Domain
+#  2. Auftragsbestätigung/Freigabe/Angebot/Lieferschein → keine Kosten (status 'kein_beleg')
+#  3. Schlussrechnung → es zählt die Gesamtleistung netto; jeder Beleg, den sie nennt (Abzugsliste), wird 'abgeloest'
+#  4. Gegenprobe: Gesamtleistung = verrechnete Belege + Zahlbetrag (±5 Cent), sonst „bitte prüfen“
+#  5. Abschläge ohne Schlussrechnung zählen einzeln („vorläufig“)
+#  6. Duplikate NIE über den Betrag – nur gleiche Datei oder gleicher Lieferant + gleiche Belegnummer
+#  7. Korrektur/Storno zählt nur, wenn der Ursprungsbeleg vorliegt; sonst ohne Wirkung (oder fragen)
+GEPRUEFT = ("bestaetigt", "manuell")   # von Andy gesetzt → nie automatisch ändern
+
+
+def nummer_genannt(nr, refs):
+    return bool(nr) and any(nr == r or (len(nr) >= 6 and len(r) >= 6 and (nr in r or r in nr)) for r in refs)
+
+
+def eigene_steuer_ids(rows):
+    """Andys eigene USt-IdNr./Steuernummer steht als „Ihre USt-IdNr.“ auf sehr vielen Belegen verschiedener Lieferanten."""
+    zaehler = {}
     for r in rows:
+        for i in set((r.get("ustids") or "").split()):
+            zaehler[i] = zaehler.get(i, 0) + 1
+    mit_ids = sum(1 for r in rows if r.get("ustids"))
+    return {i for i, n in zaehler.items() if mit_ids >= 10 and n >= 0.2 * mit_ids}
+
+
+def lieferant_von(r, eigene_ids):
+    for i in (r.get("ustids") or "").split():
+        if i not in eigene_ids:
+            return i
+    m = re.search(r"@([\w.\-]+)", r.get("absender") or "")
+    domain = m.group(1).lower() if m else ""
+    if domain and "papist" not in domain and domain not in ("gmx.de", "gmx.net", "web.de", "gmail.com", "t-online.de"):
+        return domain
+    return None
+
+
+def verrechne_projekt(rows, eigene_ids):
+    """Reine Rechenfunktion (ohne Datenbank): bekommt alle Belege EINES Projekts, liefert {id: änderungen}."""
+    vorher = {r["id"]: dict(r) for r in rows}
+    rows = [dict(r) for r in rows]
+
+    def setze(r, **felder):
+        if r["betrag_status"] in GEPRUEFT:   # von Andy bestätigte Beträge bleiben, wie sie sind
+            for k in ("betrag_netto", "betrag_status", "betrag_hinweis"):
+                felder.pop(k, None)
+        r.update(felder)
+
+    for r in rows:
+        setze(r, lieferant=lieferant_von(r, eigene_ids), status="neu")
+    # 2) keine Rechnungen
+    for r in rows:
+        if r.get("rechnungsart") == "kein_beleg":
+            setze(r, status="kein_beleg", betrag_hinweis="Auftragsbestätigung/Freigabe/Angebot – keine Kosten")
+    # 6) Duplikate: gleiche Datei oder gleicher Lieferant + gleiche Belegnummer (nie über den Betrag)
+    gesehen = {}
+    for r in sorted(rows, key=lambda x: x["id"]):
+        if r["status"] != "neu":
+            continue
         schluessel = []
-        if r["rechnungsnummer"]:
-            schluessel.append(("nr", r["projekt_id"], r["betrag_netto"], r["rechnungsnummer"].lower()))
-        if r["groesse_bytes"]:
-            schluessel.append(("datei", r["projekt_id"], r["betrag_netto"], r["groesse_bytes"]))
-        if any(s in gesehen for s in schluessel):
-            doppelt.append(r["id"])
-        gesehen.update(schluessel)
-    for rid in doppelt:
-        sb_request("PATCH", f"/rest/v1/eingangsrechnungen?id=eq.{int(rid)}",
-                   body={"status": "doppelt", "aktualisiert_am": jetzt()})
-    stat["doppelt"] = stat.get("doppelt", 0) + len(doppelt)
+        if r.get("datei_hash"):
+            schluessel.append(("datei", r["datei_hash"]))
+        if r.get("lieferant") and r.get("belegnr"):
+            schluessel.append(("nr", r["lieferant"], r["belegnr"]))
+        frueher = next((gesehen[s] for s in schluessel if s in gesehen), None)
+        if frueher is not None:
+            setze(r, status="doppelt", betrag_hinweis=f"doppelt (gleicher Beleg wie Nr. {frueher})")
+        for s in schluessel:
+            gesehen.setdefault(s, r["id"])
+
+    aktiv = [r for r in rows if r["status"] == "neu"]
+    nummern = {r["belegnr"] for r in aktiv if r.get("belegnr")}
+
+    def eigen(r):  # Betrag dieses Belegs; Korrekturen/Stornos mindern
+        n = r.get("betrag_netto")
+        if n is None:
+            return None
+        return -abs(n) if r.get("rechnungsart") == "korrektur" else n
+
+    def ursprung_da(k):  # Korrektur: liegt der korrigierte Beleg vor?
+        refs = set((k.get("referenzen") or "").split()) - {k.get("belegnr")}
+        return any(nummer_genannt(n, refs) for n in nummern if n != k.get("belegnr"))
+
+    verrechnet = set()
+    # 3)+4) Schlussrechnungen
+    for sr in sorted([r for r in aktiv if r.get("rechnungsart") == "schluss"], key=lambda x: x["id"]):
+        refs = set((sr.get("referenzen") or "").split()) - {sr.get("belegnr")}
+        vor = [o for o in aktiv if o is not sr and o.get("rechnungsart") in ("abschlag", "rechnung", "korrektur", "gutschrift")
+               and nummer_genannt(o.get("belegnr"), refs)]
+        if not vor and sr.get("lieferant"):   # Ersatz: Abschläge desselben Lieferanten (nur wenn die Gegenprobe aufgeht)
+            vor = [o for o in aktiv if o is not sr and o.get("rechnungsart") == "abschlag" and o.get("lieferant") == sr["lieferant"]]
+        gl, z = sr.get("gesamt_netto"), sr.get("zahl_netto")
+        zaehlt = [o for o in vor if not (o.get("rechnungsart") == "korrektur" and not ursprung_da(o))]
+        werte = [eigen(o) for o in zaehlt]
+        s = round(sum(w for w in werte if w is not None), 2)
+        stimmig = (gl is not None and None not in werte
+                   and ((z is not None and abs(gl - s - z) <= 0.05) or (z is None and vor and s <= gl + 0.02)))
+        if stimmig:
+            setze(sr, betrag_netto=gl, betrag_status="sicher",
+                  betrag_hinweis=f"Schlussrechnung: Gesamtleistung, {len(vor)} Vorbeleg(e) verrechnet")
+            for o in vor:
+                setze(o, status="abgeloest", betrag_hinweis=f"in Schlussrechnung {sr.get('belegnr') or sr['id']} verrechnet")
+                verrechnet.add(o["id"])
+        else:
+            def eur(x):
+                return "?" if x is None else f"{x:,.2f}".replace(",", " ").replace(".", ",").replace(" ", ".")
+            setze(sr, betrag_netto=gl if gl is not None else sr.get("betrag_netto"), betrag_status="pruefen",
+                  betrag_hinweis=f"Gegenprobe passt nicht: Gesamtleistung {eur(gl)} €, Vorbelege {eur(s)} €, "
+                                 f"Rest laut Rechnung {eur(z)} € – bitte prüfen")
+            for o in vor:
+                setze(o, betrag_status="pruefen", betrag_hinweis="gehört zu einer Schlussrechnung, deren Gegenprobe nicht aufgeht")
+                verrechnet.add(o["id"])
+
+    # 5) Abschläge ohne Schlussrechnung, 7) Korrekturen außerhalb einer Schlussrechnung
+    sr_lieferanten = {r.get("lieferant") for r in aktiv if r.get("rechnungsart") == "schluss" and r.get("lieferant")}
+    for r in aktiv:
+        if r["id"] in verrechnet or r["status"] != "neu":
+            continue
+        art = r.get("rechnungsart")
+        if art == "abschlag":
+            if r.get("lieferant") in sr_lieferanten:
+                setze(r, betrag_status="pruefen",
+                      betrag_hinweis="Schlussrechnung dieses Lieferanten vorhanden, Abschlag dort nicht gefunden – bitte prüfen")
+            elif r.get("betrag_netto") is not None and r["betrag_status"] == "sicher":
+                setze(r, betrag_hinweis="vorläufig – noch keine Schlussrechnung")
+        elif art == "korrektur":
+            if ursprung_da(r) and r.get("betrag_netto") is not None:
+                setze(r, betrag_netto=-abs(r["betrag_netto"]), betrag_status="sicher", betrag_hinweis="Korrektur/Storno zu vorhandenem Beleg")
+            else:
+                setze(r, betrag_status="pruefen", betrag_hinweis="Korrektur/Storno ohne vorhandenen Ursprungsbeleg – bitte prüfen")
+
+    # nur tatsächliche Änderungen zurückgeben
+    upd = {}
+    for r in rows:
+        diff = {k: v for k, v in r.items() if vorher[r["id"]].get(k) != v}
+        if diff:
+            upd[r["id"]] = diff
+    return upd
+
+
+def verrechnen(stat):
+    felder = ("id,projekt_id,status,betrag_status,betrag_netto,betrag_hinweis,rechnungsart,lieferant,ustids,belegnr,"
+              "referenzen,gesamt_netto,zahl_netto,datei_hash,absender")
+    rows = sb_select_all("eingangsrechnungen", felder, "&status=in.(neu,abgeloest,doppelt,kein_beleg)&order=id")
+    eigene_ids = eigene_steuer_ids(rows)
+    projekte = {}
+    for r in rows:
+        projekte.setdefault(r["projekt_id"], []).append(r)
+    for pid, liste in projekte.items():
+        if pid is None:
+            continue
+        for rid, aenderung in verrechne_projekt(liste, eigene_ids).items():
+            sb_request("PATCH", f"/rest/v1/eingangsrechnungen?id=eq.{int(rid)}", body={**aenderung, "aktualisiert_am": jetzt()})
+            for k in ("status",):
+                if k in aenderung and aenderung[k] != "neu":
+                    stat[aenderung[k]] = stat.get(aenderung[k], 0) + 1
 
 
 def betraege_auslesen(stat, maximal=1500):
-    """Liest für alle Rechnungen ohne Betrag-Status den Betrag aus dem PDF."""
+    """Liest für alle Belege ohne Betrag-Status Betrag, Belegart, Nummern und Lieferanten-IDs aus dem PDF."""
     offen = sb_select_all("eingangsrechnungen", "id,storage_pfad,betreff,dateiname",
                           "&betrag_status=is.null&status=eq.neu&storage_pfad=not.is.null&order=id")
     for r in offen[:maximal]:
+        betreff, dateiname = r["betreff"] or "", r["dateiname"] or ""
         try:
-            erg = betrag_aus_text(pdf_text(sb_download_pdf(r["storage_pfad"])), r["betreff"] or "", r["dateiname"] or "")
+            daten = sb_download_pdf(r["storage_pfad"])
+            text = pdf_text(daten)
+            erg = betrag_aus_text(text, betreff, dateiname)
+            merkmale = {"rechnungsart": beleg_art(text, betreff, dateiname), "belegnr": beleg_nummer(text, betreff, dateiname),
+                        "referenzen": " ".join(genannte_nummern(text))[:4000] or None, "ustids": " ".join(steuer_ids(text)) or None,
+                        "datei_hash": hashlib.sha256(daten).hexdigest()}
         except Exception as e:  # noqa: BLE001 – defektes PDF o. ä.
-            erg = {"netto": None, "mwst": None, "brutto": None, "nr": None, "status": "pruefen",
+            erg = {"netto": None, "mwst": None, "brutto": None, "nr": None, "status": "pruefen", "gesamt": None, "zahl": None,
                    "hinweis": f"PDF nicht lesbar ({type(e).__name__})"}
+            merkmale = {"rechnungsart": beleg_art("", betreff, dateiname), "belegnr": beleg_nummer("", betreff, dateiname)}
         body = {"betrag_netto": erg["netto"], "betrag_mwst": erg["mwst"], "betrag_brutto": erg["brutto"],
-                "betrag_status": erg["status"], "betrag_hinweis": erg["hinweis"], "betrag_ausgelesen_am": jetzt()}
+                "betrag_status": erg["status"], "betrag_hinweis": erg["hinweis"], "betrag_ausgelesen_am": jetzt(),
+                "gesamt_netto": erg["gesamt"], "zahl_netto": erg["zahl"], **merkmale}
         if erg["nr"]:
             body["rechnungsnummer"] = erg["nr"][:100]
         sb_request("PATCH", f"/rest/v1/eingangsrechnungen?id=eq.{int(r['id'])}", body=body)
@@ -661,7 +870,7 @@ def main(nur_ordner=False):
         if not nur_ordner:
             eigene_markieren(stat)
             betraege_auslesen(stat)
-            doppelte_markieren(stat)
+            verrechnen(stat)
 
         # Bestätigte Zuordnungen auf alle Rechnungen des Ordners anwenden (z. B. nach Änderung in der App)
         for ordner in mapping:
@@ -684,7 +893,8 @@ def main(nur_ordner=False):
           f"Mails geprüft: {stat['mails']} | neue Rechnungen (PDFs): {stat['neue_rechnungen']} | "
           f"Mails ohne PDF: {stat['ohne_pdf']} | verschoben: {stat['verschoben']} | "
           f"Beträge sicher: {stat.get('betrag_sicher', 0)}, bitte prüfen: {stat.get('betrag_pruefen', 0)} | "
-          f"eigene Rechnungen: {stat.get('eigene', 0)}, doppelte: {stat.get('doppelt', 0)}")
+          f"eigene: {stat.get('eigene', 0)}, doppelt: {stat.get('doppelt', 0)}, abgelöst: {stat.get('abgeloest', 0)}, "
+          f"keine Rechnung: {stat.get('kein_beleg', 0)}")
     return 1 if fehler else 0
 
 
@@ -764,19 +974,90 @@ def selbsttest():
     assert (e["status"], e["netto"], e["brutto"]) == ("sicher", 50.0, 59.5), e
     e = betrag_aus_text("Beispiel Bau GmbH\nPos 1 Arbeiten 400,00\nPos 2 Material 600,00\n1.000,00\n190,00\n1.190,00")
     assert (e["status"], e["netto"]) == ("sicher", 1000.0) and "Dreier" in e["hinweis"], e  # Dreier-Probe
+    # Abschlags-/Schlussrechnungen: Betrag DIESES Belegs, Gesamtleistung und Zahlbetrag getrennt erkennen
     e = betrag_aus_text("3. Abschlagsrechnung Beispielbau\nGesamtleistung netto 50.000,00\nMwSt 19% 9.500,00\n"
                         "Gesamt brutto 59.500,00\nabzüglich bisherige Abschläge 47.600,00\nzu zahlen 11.900,00")
-    assert e["status"] == "pruefen" and "Abschlag" in e["hinweis"], e  # Gesamtleistung darf NICHT sicher zählen
-    # Abschlags-/Schlussrechnungen: Betrag wird erkannt, aber immer „bitte prüfen“ (Vorgabe Andy)
+    assert (e["status"], e["netto"], e["gesamt"], e["zahl"]) == ("sicher", 10000.0, 50000.0, 10000.0), e
     e = betrag_aus_text("Abschlagsrechnung Nr. 3 Beispielbau\nNetto 10.000,00\nMwSt 1.900,00\nzu zahlen 11.900,00")
-    assert (e["status"], e["netto"]) == ("pruefen", 10000.0), e
+    assert (e["status"], e["netto"]) == ("sicher", 10000.0), e
     e = betrag_aus_text("Beispiel Fenster GmbH\nZwischensumme 1.985,00\nÜbertrag 1.985,00\nGesamtbetrag* 2.359,40\n"
                         "*Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)\n"
                         "Abzüglich erhaltener Abschlagszahlungen Brutto €\n1. Anzahlungsrechnung vom 01.09.2026 -1.179,70\n"
                         "Forderungsbetrag* 1.179,70")
-    assert (e["status"], e["netto"], e["mwst"]) == ("pruefen", 1179.7, 0.0), e  # §13b: Vorschlag Forderungsbetrag
-    e = betrag_aus_text("Rechnung Beispiel GmbH\nNetto 100,00\nMwSt 19,00\nBrutto 119,00", "Schlussrechnung BV Muster", "SR.pdf")
-    assert e["status"] == "pruefen", e  # Schlussrechnung nur im Betreff erkannt
+    assert (e["netto"], e["mwst"], e["gesamt"], e["zahl"]) == (1179.7, 0.0, 2359.4, 1179.7), e  # §13b-Schluss
+    e = betrag_aus_text("Beispiel Fensterbau\nSchlussrechnung 9200999\nNetto 1.542,00\nMwSt 292,98\nBrutto 1.834,98\n"
+                        "abzüglich Anzahlung 771,00 netto 917,49 brutto\nForderung 917,49")
+    assert (e["gesamt"], e["zahl"]) == (1542.0, 771.0), e   # Zahlbetrag steht brutto da → netto umgerechnet
+
+    # Belegart, Belegnummer, genannte Nummern, Steuer-IDs (ausgedachte Belege)
+    assert beleg_art("Musterfirma\nAuftragsbestätigung AB2025000999\nAnzahlung 50 % bei Auftrag") == "kein_beleg"
+    assert beleg_art("Musterfirma\nSchlussrechnung RE2025000111\nabzüglich Anzahlung RE2025000110") == "schluss"
+    assert beleg_art("Musterfirma\n1. Abschlagsrechnung R26/000101 vom 12.06.2026") == "abschlag"
+    assert beleg_art("Musterfirma\nRechnungskorrektur 6800001 zu Re 6000001") == "korrektur"
+    assert beleg_art("Musterfirma\nRechnung 9200001") == "rechnung"
+    assert beleg_art("", "Bestätigung und Anzahlungsrechnung", "7301234 AB Muster.pdf") == "kein_beleg"
+    assert beleg_art("Rechnung Beispiel GmbH\nNetto 100,00", "Schlussrechnung BV Muster", "SR.pdf") == "schluss"
+    assert beleg_nummer("Musterfirma\n1. Abschlagsrechnung R26/000101 vom 12.06.2026") == "26000101"
+    assert beleg_nummer("Musterfirma\nRechnung Nr. RE2025000584\nDatum 01.01.2026") == "2025000584"
+    assert beleg_nummer("Musterfirma\nRechnung vom 12.06.2026", "Schlussrechnung 9200549 Muster") == "9200549"
+    assert {"6000393", "26000101"} <= set(genannte_nummern("abzgl. RE 600.0393 und R26/000101 vom 1.2.2026"))
+    assert steuer_ids("USt-IdNr. DE 123 456 789\nSteuernummer 143/152/83044") == ["DE123456789", "143/152/83044"]
+
+    # Verrechnung je Projekt – ausgedachte Fälle nach den Mustern, die am 31.10.2026 an echten Belegen geprüft wurden
+    def mk(i, art, netto, **kw):
+        r = {"id": i, "status": "neu", "betrag_status": "sicher", "betrag_netto": netto, "betrag_hinweis": None,
+             "rechnungsart": art, "lieferant": None, "ustids": "DE111111111 DE999999999", "belegnr": None,
+             "referenzen": None, "gesamt_netto": None, "zahl_netto": None, "datei_hash": f"h{i}", "absender": "a@beispiel.de"}
+        r.update(kw)
+        return r
+
+    def ergebnis(rows):
+        u = verrechne_projekt(rows, {"DE999999999"})
+        return {r["id"]: {**r, **u.get(r["id"], {})} for r in rows}
+
+    def kosten(e):
+        return round(sum(r["betrag_netto"] for r in e.values()
+                         if r["status"] == "neu" and r["betrag_status"] == "sicher"), 2)
+
+    # A) zwei Abschläge + Schlussrechnung (Gesamtleistung zählt, Abschläge abgelöst; Probe 20.000+10.000+15.000)
+    e = ergebnis([mk(1, "abschlag", 20000.0, belegnr="26000101"), mk(2, "abschlag", 10000.0, belegnr="26000202"),
+                  mk(3, "schluss", 15000.0, belegnr="26000303", gesamt_netto=45000.0, zahl_netto=15000.0,
+                     referenzen="26000101 26000202 26000303")])
+    assert kosten(e) == 45000.0 and e[1]["status"] == e[2]["status"] == "abgeloest", e
+    # B) Auftragsbestätigung + Anzahlung + Schluss; Anzahlung == Restbetrag (darf NICHT als Duplikat gelten)
+    e = ergebnis([mk(4, "kein_beleg", 2000.0), mk(5, "abschlag", 1000.0, belegnr="2025000001"),
+                  mk(6, "schluss", 1000.0, belegnr="2025000002", gesamt_netto=2000.0, zahl_netto=1000.0, referenzen="2025000001")])
+    assert kosten(e) == 2000.0 and e[4]["status"] == "kein_beleg" and e[5]["status"] == "abgeloest", e
+    # C) Schlussrechnung doppelt (identische Datei) → nur einmal
+    e = ergebnis([mk(7, "abschlag", 700.0, belegnr="2025000441"),
+                  mk(8, "schluss", 700.0, belegnr="2025000467", gesamt_netto=1400.0, zahl_netto=700.01, referenzen="2025000441",
+                     datei_hash="gleich"),
+                  mk(9, "schluss", 700.0, belegnr="2025000467", gesamt_netto=1400.0, zahl_netto=700.01, referenzen="2025000441",
+                     datei_hash="gleich")])
+    assert kosten(e) == 1400.0 and e[9]["status"] == "doppelt", e
+    # D) Rechnung + Storno eines fehlenden Belegs + Schlussrechnung, die alles verrechnet (Rest 0)
+    e = ergebnis([mk(10, "rechnung", 500.0, belegnr="9200001"),
+                  mk(11, "korrektur", 500.0, belegnr="6800001", referenzen="6800001 6000001"),
+                  mk(12, "schluss", 0.0, belegnr="9200002", gesamt_netto=500.0, zahl_netto=0.0,
+                     referenzen="6000001 6800001 9200001 9200002")])
+    assert kosten(e) == 500.0 and e[10]["status"] == e[11]["status"] == "abgeloest", e
+    # E) Abschlag ohne Schlussrechnung → zählt vorläufig
+    e = ergebnis([mk(13, "abschlag", 3000.0, belegnr="5550001")])
+    assert kosten(e) == 3000.0 and "vorläufig" in e[13]["betrag_hinweis"], e
+    # F) Gegenprobe geht nicht auf → nichts zählt automatisch, Andy wird gefragt
+    e = ergebnis([mk(14, "abschlag", 30000.0, belegnr="7770001"),
+                  mk(15, "schluss", 5000.0, belegnr="7770002", gesamt_netto=25000.0, zahl_netto=5000.0, referenzen="7770001")])
+    assert kosten(e) == 0 and e[15]["betrag_status"] == e[14]["betrag_status"] == "pruefen", e
+    # G) gleiche Belegnummer desselben Lieferanten, andere Datei (weitergeleitet) → doppelt; gleicher Betrag allein → NICHT
+    e = ergebnis([mk(16, "rechnung", 99.0, belegnr="1234567"), mk(17, "rechnung", 99.0, belegnr="1234567"),
+                  mk(18, "rechnung", 99.0, belegnr="7654321")])
+    assert e[17]["status"] == "doppelt" and e[18]["status"] == "neu" and kosten(e) == 198.0, e
+    # Andys eigene Steuernummer steht auf vielen Belegen → wird nicht als Lieferant genommen
+    viele = [{"ustids": f"DE{i:09d} DE999999999"} for i in range(1, 13)]
+    assert eigene_steuer_ids(viele) == {"DE999999999"}
+    assert lieferant_von({"ustids": "DE999999999 DE111111111", "absender": "x@papist-bau.de"}, {"DE999999999"}) == "DE111111111"
+    assert lieferant_von({"ustids": "", "absender": "Info <info@beispiel-glas.de>"}, set()) == "beispiel-glas.de"
+    assert lieferant_von({"ustids": "", "absender": "info@papist-bau.de"}, set()) is None
     # Betrag im Dateinamen als Abgleich
     e = betrag_aus_text("BEISPIELMARKT\nSUMME EUR 78,94\nenthaltene MwSt 19% 12,60", "", "Beispielmarkt 28.07.26 78,94€ Muster.pdf")
     assert e["status"] == "sicher" and "Dateiname bestätigt" in e["hinweis"], e
@@ -797,14 +1078,15 @@ def selbsttest():
 
 def neu_auslesen():
     """Liest alle automatisch ermittelten Beträge neu aus (von Andy Bestätigtes oder von Hand Erfasstes bleibt unberührt)."""
-    sb_request("PATCH", "/rest/v1/eingangsrechnungen?betrag_status=in.(sicher,pruefen)&status=in.(neu,doppelt)",
+    sb_request("PATCH", "/rest/v1/eingangsrechnungen?betrag_status=in.(sicher,pruefen)&status=in.(neu,doppelt,abgeloest,kein_beleg)",
                body={"betrag_status": None, "status": "neu", "aktualisiert_am": jetzt()})
     stat = {}
     eigene_markieren(stat)
     betraege_auslesen(stat)
-    doppelte_markieren(stat)
+    verrechnen(stat)
     print(f"Neu ausgelesen | Beträge sicher: {stat.get('betrag_sicher', 0)}, bitte prüfen: {stat.get('betrag_pruefen', 0)} | "
-          f"eigene Rechnungen: {stat.get('eigene', 0)}, doppelte: {stat.get('doppelt', 0)}")
+          f"eigene: {stat.get('eigene', 0)}, doppelt: {stat.get('doppelt', 0)}, abgelöst: {stat.get('abgeloest', 0)}, "
+          f"keine Rechnung: {stat.get('kein_beleg', 0)}")
     return 0
 
 
