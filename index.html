@@ -2217,7 +2217,7 @@ function renderControlling(){
     const pER=erByProj[String(p.id)]||[];
     // Nur gesicherte Beträge zählen (automatisch stimmig, von Andy bestätigt oder von Hand erfasst)
     const erNetto=pER.filter(erZaehlt).reduce((a,r)=>a+(Number(r.betrag_netto)||0),0);
-    const erOhneBetrag=pER.filter(r=>r.status!=='doppelt'&&!erZaehlt(r)).length;
+    const erOhneBetrag=pER.filter(r=>!erNurInfo(r)&&!erZaehlt(r)).length;
     const deckung=(p.wertNetto||p.wert)&&rechBezP?Math.round(rechBezP/(p.wertNetto||p.wert)*100):0;
     const auftragsNetto=p.wertNetto||p.wert||0;
     const deckungsBeitrag=auftragsNetto?(auftragsNetto-matNetto-lohnP-erNetto):null;
@@ -2394,8 +2394,9 @@ async function loadEingangsrechnungen(){
     const sel='id,projekt_id,ordner_name,absender,betreff,mail_datum,dateiname,storage_pfad,betrag_netto,betrag_brutto,betrag_mwst,betrag_status,betrag_hinweis,rechnungsnummer,status';
     const rows=[];
     for(let off=0;;off+=1000){
-      // 'eigene' (Andys Kundenrechnungen) und 'geloescht' gehören nicht zu den Kosten; 'doppelt' bleibt sichtbar, zählt aber nicht
-      const r=await fetch(`${SB_URL}/rest/v1/eingangsrechnungen?select=${sel}&status=in.(neu,manuell,doppelt)&order=mail_datum.desc.nullslast,id.desc&offset=${off}&limit=1000`,{headers:sbHeaders});
+      // 'eigene' (Andys Kundenrechnungen), 'kein_beleg' (Auftragsbestätigungen usw.) und 'geloescht' sind keine Kosten;
+      // 'doppelt' und 'abgeloest' (in Schlussrechnung verrechnet) bleiben sichtbar, zählen aber nicht
+      const r=await fetch(`${SB_URL}/rest/v1/eingangsrechnungen?select=${sel}&status=in.(neu,manuell,doppelt,abgeloest)&order=mail_datum.desc.nullslast,id.desc&offset=${off}&limit=1000`,{headers:sbHeaders});
       if(!r.ok) throw new Error('eingangsrechnungen '+r.status);
       const page=await r.json(); rows.push(...page);
       if(page.length<1000) break;
@@ -2417,7 +2418,8 @@ function rechnungsfaehigeProjekte(){
 }
 
 // Zählt ein Betrag im Deckungsbeitrag? Nur wenn gesichert (siehe db/008_betraege.sql)
-const erZaehlt = r => r.status!=='doppelt' && r.betrag_netto!=null && ['sicher','bestaetigt','manuell'].includes(r.betrag_status);
+const erNurInfo = r => r.status==='doppelt' || r.status==='abgeloest';   // sichtbar, zählt nicht
+const erZaehlt = r => !erNurInfo(r) && r.betrag_netto!=null && ['sicher','bestaetigt','manuell'].includes(r.betrag_status);
 const eur2 = n => Number(n).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 
 async function speichereBetrag(id, felder){
@@ -2478,10 +2480,11 @@ function renderEingangsReSection(p, pER, erNetto, erOhneBetrag, darfHinzufuegen)
     const datum=r.mail_datum?fmt(r.mail_datum.slice(0,10)):'–';
     const zaehlt=erZaehlt(r);
     const betragTxt=r.betrag_netto!=null?eur2(r.betrag_netto):'–';
-    const betrag=r.status==='doppelt'
-      ? `<span style="color:var(--t2);text-decoration:line-through">${betragTxt}</span><div><span class="badge" style="font-size:10px;background:var(--card2);color:var(--t2)">doppelt – zählt nicht</span></div>`
+    const vorlaeufig = zaehlt && /^vorläufig/.test(r.betrag_hinweis||'');
+    const betrag=erNurInfo(r)
+      ? `<span style="color:var(--t2);text-decoration:line-through">${betragTxt}</span><div><span class="badge" style="font-size:10px;background:var(--card2);color:var(--t2)">${r.status==='doppelt'?'doppelt – zählt nicht':'in Schlussrechnung verrechnet'}</span></div>`
       : zaehlt
-      ? `${betragTxt}${r.betrag_status==='bestaetigt'?' <span title="von dir bestätigt">✔</span>':''}`
+      ? `${betragTxt}${r.betrag_status==='bestaetigt'?' <span title="von dir bestätigt">✔</span>':''}${vorlaeufig?'<div><span class="badge b-blue" style="font-size:10px">vorläufig – Abschlag</span></div>':''}${r.betrag_hinweis&&/^Schlussrechnung/.test(r.betrag_hinweis)?'<div style="font-size:11px;color:var(--t2);font-weight:400">Schlussrechnung (Gesamtleistung)</div>':''}`
       : `<span style="color:var(--orange)" title="${esc(r.betrag_hinweis||'noch nicht ausgelesen')}">${betragTxt}</span>
          <div><span class="badge b-accent" style="font-size:10px">${r.betrag_status==='pruefen'?'bitte prüfen':'wird ausgelesen'}</span></div>
          ${r.betrag_hinweis?`<div style="font-size:11px;color:var(--t2);font-weight:400">${esc(r.betrag_hinweis)}</div>`:''}`;
@@ -2493,7 +2496,7 @@ function renderEingangsReSection(p, pER, erNetto, erOhneBetrag, darfHinzufuegen)
       <td style="font-weight:700;white-space:nowrap">${betrag}</td>
       <td style="white-space:nowrap">
         ${r.storage_pfad?`<button class="btn btn-blue btn-sm" onclick="openEingangsPdf(${r.id})" title="PDF öffnen">📄</button>`:''}
-        ${!zaehlt&&r.status!=='doppelt'&&r.betrag_netto!=null?`<button class="btn btn-primary btn-sm" onclick="bestaetigeBetrag(${r.id})" title="Vorschlag ${eur2(r.betrag_netto)} netto übernehmen">✓</button>`:''}
+        ${!zaehlt&&!erNurInfo(r)&&r.betrag_netto!=null?`<button class="btn btn-primary btn-sm" onclick="bestaetigeBetrag(${r.id})" title="Vorschlag ${eur2(r.betrag_netto)} netto übernehmen">✓</button>`:''}
         <button class="edit-btn" onclick="openBetragModal(${r.id})" title="Betrag eintragen / korrigieren">✏</button>
         <button class="del-btn" onclick="deleteEingangsRe(${r.id})" title="Aus Liste und Summen entfernen">🗑</button>
       </td>
