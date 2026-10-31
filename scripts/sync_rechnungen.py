@@ -275,7 +275,7 @@ LABELS = {
               r"\bsumme\b(?!\s+(?:netto|ohne|der\s+positionen))",
 }
 ZU_ZAHLEN = (r"zu\s+zahlen|zahlbetrag|zahlbar|auszahlungsbetrag|restbetrag|restforderung|forderungsbetrag|\bforderung\b|"
-             r"offener\s+betrag|noch\s+offen")
+             r"offener\s+betrag|noch\s+offen|\brest\b")
 ABSCHLAG = (r"abschlag|abzügl|abzgl|bereits\s+(?:gezahlt|bezahlt|berechnet)|bisher\s+(?:gezahlt|berechnet|abgerechnet)|"
             r"teilzahlung|anzahlung")
 NR_RE = re.compile(r"(?:rechnungs?\s*-?\s*(?:nr|nummer)|rg\.?\s*-?\s*nr|beleg\s*-?\s*nr)\.?\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9\-/._]{2,30})",
@@ -356,7 +356,12 @@ def beleg_art(text, betreff="", dateiname=""):
         if quelle is not kopf and re.search(AB_DATEINAME, quelle):
             treffer.append((-1, "kein_beleg"))
         if treffer:
-            return min(treffer)[1]
+            erste = min(treffer)[1]
+            # Eine Korrektur/ein Storno nennt oft zuerst den korrigierten Beleg („… zu Anzahlungsrechnung …“):
+            # steht „Rechnungskorrektur/Storno“ im Kopf, ist es eine Korrektur – außer der Beleg ist eine Schlussrechnung.
+            if erste != "schluss" and any(a == "korrektur" for _, a in treffer):
+                return "korrektur"
+            return erste
     return "rechnung"
 
 
@@ -439,6 +444,10 @@ def _betrag_aus_pdf(text):
         for m in mwst_k:
             if 0 < m < b and stimmt(round(b - m, 2), b):
                 passend.append((b, round(b - m, 2)))
+    # Summenzeile ohne MwSt (Netto = Brutto), die größer ist als jede 19 %/7 %-Kombination → sie gilt.
+    # (Fall aus der Prüfung: Positionen mit 19 % ausgewiesen, Summe mit 0 % MwSt.)
+    if passend and gleich and max(gleich) > max(n for _, n in passend):
+        passend = []
     # 3) Dreier-Probe: Netto, MwSt und Brutto stehen als Zahlen irgendwo und passen genau zusammen
     #    (nicht bei Belegen ohne MwSt – dort würden Positionszeilen fälschlich als Summe erkannt)
     quelle = "beschriftet"
@@ -994,6 +1003,11 @@ def selbsttest():
     assert beleg_art("Musterfirma\nSchlussrechnung RE2025000111\nabzüglich Anzahlung RE2025000110") == "schluss"
     assert beleg_art("Musterfirma\n1. Abschlagsrechnung R26/000101 vom 12.06.2026") == "abschlag"
     assert beleg_art("Musterfirma\nRechnungskorrektur 6800001 zu Re 6000001") == "korrektur"
+    assert beleg_art("Musterfirma\nzu Ihrer Anzahlungsrechnung 6000002\nRechnungskorrektur 6800002") == "korrektur"
+    # Positionen mit 19 % ausgewiesen, Summenzeile mit 0 % MwSt → die Summenzeile gilt
+    e = betrag_aus_text("Beispiel Fenster\nSchlussrechnung 9200777\nPos 1 Netto 1.000,00 MwSt 190,00 Brutto 1.190,00\n"
+                        "Summe Netto 5.000,00 MwSt 0,00 Brutto 5.000,00\nabzgl. RE 600.0002 3.000,00\nRest 2.000,00")
+    assert (e["gesamt"], e["zahl"]) == (5000.0, 2000.0), e
     assert beleg_art("Musterfirma\nRechnung 9200001") == "rechnung"
     assert beleg_art("", "Bestätigung und Anzahlungsrechnung", "7301234 AB Muster.pdf") == "kein_beleg"
     assert beleg_art("Rechnung Beispiel GmbH\nNetto 100,00", "Schlussrechnung BV Muster", "SR.pdf") == "schluss"
