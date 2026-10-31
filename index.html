@@ -2296,7 +2296,7 @@ function renderControlling(){
             </div>`).join('')}
           ${pMat.length>5?`<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--t2)">+${pMat.length-5} weitere</div>`:''}
         </div>`:''}
-        ${renderEingangsReSection(p, pER, erNetto, erOhneBetrag)}
+        ${renderEingangsReSection(p, pER, erNetto, erOhneBetrag, stundP>0)}
       </div>
 
       <!-- 📊 ERGEBNIS -->
@@ -2399,7 +2399,8 @@ function absenderName(a){
   return m ? m[1] : String(a||'').replace(/[<>]/g,'');
 }
 
-function renderEingangsReSection(p, pER, erNetto, erOhneBetrag){
+// darfHinzufuegen: nur Projekte mit gebuchten Stunden bekommen Eingangsrechnungen (Vorgabe Andy)
+function renderEingangsReSection(p, pER, erNetto, erOhneBetrag, darfHinzufuegen){
   const pid=String(p.id);
   const offen=erOffen.has(pid);
   const rows=pER.map(r=>{
@@ -2423,7 +2424,9 @@ function renderEingangsReSection(p, pER, erNetto, erOhneBetrag){
     </div>
     <div style="padding:0 18px 10px;display:flex;gap:8px;flex-wrap:wrap">
       ${pER.length?`<button class="btn btn-ghost btn-sm" onclick="toggleEingangsRe('${pid}')">${offen?'▲ Liste ausblenden':'▼ Liste anzeigen'}</button>`:''}
-      <button class="btn btn-primary btn-sm" onclick="openEingangsReModal(${p.id})">＋ Eingangsrechnung hinzufügen</button>
+      ${darfHinzufuegen
+        ? `<button class="btn btn-primary btn-sm" onclick="openEingangsReModal(${p.id})">＋ Eingangsrechnung hinzufügen</button>`
+        : `<span class="cp-hinweis">Eingangsrechnungen erst, wenn Stunden auf das Projekt gebucht sind</span>`}
     </div>
     ${pER.length&&offen?`<div style="overflow-x:auto;padding:0 0 8px">
       <table class="ctrl-table">
