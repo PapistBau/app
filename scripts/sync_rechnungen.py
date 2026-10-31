@@ -267,11 +267,15 @@ def vorschlag_projekt(ordner, projekte):
 
 BETRAG_RE = re.compile(r"(?<![\d.,])-?\d{1,3}(?:\.\d{3})*,\d{2}(?!\d)(?!\s*%)|(?<![\d.,])-?\d+,\d{2}(?!\d)(?!\s*%)")
 LABELS = {
-    "netto": r"netto(?:betrag|summe|wert)?|summe\s+netto|gesamt\s*netto|warenwert|zwischensumme",
-    "mwst": r"mwst|mw\.?\s*-?st|mehrwertsteuer|umsatzsteuer|\bust\b",
+    "netto": r"netto(?:betrag|summe|wert)?|summe\s+netto|gesamt\s*netto|warenwert|zwischensumme|"
+             r"(?:summe|betrag|gesamt)\s+ohne\s+(?:mwst|ust|umsatzsteuer|mehrwertsteuer)",
+    "mwst": r"mwst|mw\.?\s*-?st|mehrwertsteuer|umsatzsteuer|\bust\b|\bsteuer\b",
     "brutto": r"brutto(?:betrag|summe)?|gesamtbetrag|rechnungsbetrag|rechnungssumme|endbetrag|zu\s+zahlen|zahlbetrag|"
-              r"gesamtsumme|summe\s+brutto|\btotal\b|zahlbar",
+              r"gesamtsumme|summe\s+brutto|\btotal\b|zahlbar|summe\s+inkl|betrag\s+inkl|"
+              r"\bsumme\b(?!\s+(?:netto|ohne|der\s+positionen))",
 }
+ZU_ZAHLEN = r"zu\s+zahlen|zahlbetrag|zahlbar|auszahlungsbetrag|restbetrag"
+ABSCHLAG = r"abschlag|abzügl|abzgl|bereits\s+(?:gezahlt|bezahlt|berechnet)|bisher\s+(?:gezahlt|berechnet|abgerechnet)|teilzahlung"
 NR_RE = re.compile(r"(?:rechnungs?\s*-?\s*(?:nr|nummer)|rg\.?\s*-?\s*nr|beleg\s*-?\s*nr)\.?\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9\-/._]{2,30})",
                    re.IGNORECASE)
 
@@ -280,12 +284,32 @@ def zahl(s):
     return round(float(s.replace(".", "").replace(",", ".")), 2)
 
 
+def alle_betraege(text):
+    return {zahl(b.group(0)) for b in BETRAG_RE.finditer(text)}
+
+
 def kandidaten(text):
     """Findet je Art (netto/mwst/brutto) die Beträge, die hinter einer passenden Beschriftung stehen."""
     gefunden = {k: [] for k in LABELS}
+    gefunden["zu_zahlen"] = []
     zeilen = [z.strip() for z in text.splitlines()]
     for i, zeile in enumerate(zeilen):
         klein = zeile.lower()
+        # Tabellen-Summen: Beschriftungen nebeneinander ohne Zahlen, Zahlen in der nächsten Zeile
+        if not BETRAG_RE.search(zeile) and i + 1 < len(zeilen):
+            treffer = sorted((m.start(), art) for art, muster in LABELS.items() for m in re.finditer(muster, klein))
+            arten = []
+            for _, art in treffer:
+                if not arten or arten[-1] != art:
+                    arten.append(art)
+            werte = [zahl(b.group(0)) for b in BETRAG_RE.finditer(zeilen[i + 1])]
+            if len(arten) >= 2 and len(werte) == len(arten):
+                for art, wert in zip(arten, werte):
+                    gefunden[art].append(wert)
+        for m in re.finditer(ZU_ZAHLEN, klein):
+            b = BETRAG_RE.search(zeile[m.end():])
+            if b:
+                gefunden["zu_zahlen"].append(zahl(b.group(0)))
         for art, muster in LABELS.items():
             for m in re.finditer(muster, klein):
                 rest = zeile[m.end():]
@@ -309,22 +333,53 @@ def betrag_aus_text(text):
     klein = text.lower()
     k = kandidaten(text)
     netto_k, mwst_k, brutto_k = set(k["netto"]), set(k["mwst"]), set(k["brutto"])
+    zu_zahlen = set(k["zu_zahlen"])
+    abschlag = re.search(ABSCHLAG, klein) is not None
 
-    # 1) Rechnerisch stimmige Kombination suchen (größter Brutto-Betrag = Endsumme)
+    def stimmt(n, b):
+        return any(abs(n * (1 + s) - b) <= max(0.02, b * 0.0002) for s in (0.19, 0.07))
+
+    # 1) Beschriftete Summen, die rechnerisch zusammenpassen
     passend = []
     for n in netto_k:
         for b in brutto_k:
-            if n <= 0 or b <= 0:
-                continue
-            for satz in (0.19, 0.07):
-                if abs(n * (1 + satz) - b) <= max(0.02, b * 0.0002):
-                    passend.append((b, n))
-            for m in mwst_k:
-                if m > 0 and abs(n + m - b) <= 0.02:
-                    passend.append((b, n))
+            if n > 0 and b > 0 and (stimmt(n, b) or any(m > 0 and abs(n + m - b) <= 0.02 for m in mwst_k)):
+                passend.append((b, n))
+    # 2) Brutto + ausgewiesene MwSt (z. B. „darin enthalten 19 % MwSt“)
+    for b in brutto_k:
+        for m in mwst_k:
+            if 0 < m < b and stimmt(round(b - m, 2), b):
+                passend.append((b, round(b - m, 2)))
+    # 3) Dreier-Probe: Netto, MwSt und Brutto stehen als Zahlen irgendwo und passen genau zusammen
+    quelle = "beschriftet"
+    if not passend:
+        alle = sorted(x for x in alle_betraege(text) if x > 0)
+        alle_set = set(alle)
+        for n in alle:
+            for s in (0.19, 0.07):
+                b = round(n * (1 + s), 2)
+                for kand in (b, round(b - 0.01, 2), round(b + 0.01, 2)):
+                    if kand in alle_set and round(kand - n, 2) in alle_set:
+                        passend.append((kand, n))
+        quelle = "Dreier-Probe"
+
     if passend:
-        b, n = max(passend)
-        erg.update(netto=n, brutto=b, mwst=round(b - n, 2), status="sicher")
+        # Bei Abschlags-/Teilrechnungen steht oft die Gesamtleistung als größte Summe darauf.
+        # Dann nur „sicher“, wenn die Kombination genau dem Betrag unter „zu zahlen“ entspricht.
+        if abschlag:
+            treffer = [(b, n) for b, n in passend if b in zu_zahlen]
+            if len({b for b, _ in treffer}) == 1:
+                b, n = treffer[0]
+                erg.update(netto=n, brutto=b, mwst=round(b - n, 2), status="sicher",
+                           hinweis="Abschlagsrechnung: Betrag „zu zahlen“")
+            else:
+                b, n = min(passend)
+                erg.update(netto=n, brutto=b, mwst=round(b - n, 2),
+                           hinweis="Abschlags-/Teilrechnung – welcher Betrag gilt? bitte prüfen")
+        else:
+            b, n = max(passend)
+            erg.update(netto=n, brutto=b, mwst=round(b - n, 2), status="sicher",
+                       hinweis=None if quelle == "beschriftet" else "Summen per Dreier-Probe erkannt")
     else:
         # 2) §13b: keine MwSt, Netto = Rechnungsbetrag
         p13b = "13b" in klein or "steuerschuldnerschaft" in klein or "reverse charge" in klein
@@ -357,6 +412,31 @@ def pdf_text(data):
         for seite in pdf.pages[:10]:
             teile.append(seite.extract_text() or "")
     return "\n".join(teile)
+
+
+DIAG_RE = re.compile(r"netto|brutto|mwst|ust\b|steuer|summe|gesamt|betrag|zahlen|total|abschlag|abzgl|abzügl|13b",
+                     re.IGNORECASE)
+
+
+def diagnose(anzahl=30):
+    """Schreibt für einige „bitte prüfen“-Rechnungen die Betrags-Zeilen in die GESCHÜTZTE Tabelle betrag_diagnose
+    (kein Zugriff von außen). Dient nur zum Abstimmen der Erkennung; Tabelle wird danach gelöscht. Nichts ins Protokoll."""
+    zeilen_gesamt = 0
+    rows = sb_select_all("eingangsrechnungen", "id,storage_pfad,betrag_hinweis",
+                         "&betrag_status=eq.pruefen&storage_pfad=not.is.null&order=id")
+    # gleichmäßig über die Liste verteilt auswählen
+    schritt = max(1, len(rows) // anzahl)
+    for r in rows[::schritt][:anzahl]:
+        try:
+            text = pdf_text(sb_download_pdf(r["storage_pfad"]))
+        except Exception as e:  # noqa: BLE001
+            text = f"(PDF nicht lesbar: {type(e).__name__})"
+        relevant = [z.strip() for z in text.splitlines() if BETRAG_RE.search(z) or DIAG_RE.search(z)]
+        auszug = "\n".join(z[:160] for z in relevant[-45:])[:4000]
+        sb_request("POST", "/rest/v1/betrag_diagnose",
+                   body={"rechnung_id": r["id"], "hinweis": r["betrag_hinweis"], "zeilen": auszug})
+        zeilen_gesamt += 1
+    print(f"Diagnose: {zeilen_gesamt} Beispiele in geschützte Tabelle geschrieben")
 
 
 def betraege_auslesen(stat, maximal=1500):
@@ -605,10 +685,41 @@ def selbsttest():
     assert e["status"] == "pruefen" and "Gutschrift" in e["hinweis"], e
     e = betrag_aus_text("Rechnung über Beispielarbeiten\nNetto 1.000,00\nBrutto 1.500,00")  # passt nicht zusammen
     assert e["status"] == "pruefen", e
+    e = betrag_aus_text("Beispiel Handwerk GmbH\nNetto MwSt Brutto\n1.000,00 190,00 1.190,00")  # Tabellen-Summen
+    assert (e["status"], e["netto"]) == ("sicher", 1000.0), e
+    e = betrag_aus_text("BEISPIEL BAUMARKT\nSchrauben 9,99\nSUMME EUR 59,50\nenthaltene MwSt 19% 9,50")  # Kassenbeleg
+    assert (e["status"], e["netto"], e["brutto"]) == ("sicher", 50.0, 59.5), e
+    e = betrag_aus_text("Beispiel Bau GmbH\nPos 1 Arbeiten 400,00\nPos 2 Material 600,00\n1.000,00\n190,00\n1.190,00")
+    assert (e["status"], e["netto"]) == ("sicher", 1000.0) and "Dreier" in e["hinweis"], e  # Dreier-Probe
+    e = betrag_aus_text("3. Abschlagsrechnung Beispielbau\nGesamtleistung netto 50.000,00\nMwSt 19% 9.500,00\n"
+                        "Gesamt brutto 59.500,00\nabzüglich bisherige Abschläge 47.600,00\nzu zahlen 11.900,00")
+    assert e["status"] == "pruefen" and "Abschlag" in e["hinweis"], e  # Gesamtleistung darf NICHT sicher zählen
+    e = betrag_aus_text("Abschlagsrechnung Nr. 3 Beispielbau\nNetto 10.000,00\nMwSt 1.900,00\nzu zahlen 11.900,00")
+    assert (e["status"], e["netto"]) == ("sicher", 10000.0), e
 
     print("Selbsttest OK")
     return 0
 
 
+def neu_auslesen():
+    """Liest alle automatisch als „bitte prüfen“ markierten Beträge neu aus (von Andy Bestätigtes bleibt unberührt)."""
+    sb_request("PATCH", "/rest/v1/eingangsrechnungen?betrag_status=eq.pruefen",
+               body={"betrag_status": None, "aktualisiert_am": jetzt()})
+    stat = {}
+    betraege_auslesen(stat)
+    print(f"Neu ausgelesen | Beträge sicher: {stat.get('betrag_sicher', 0)}, bitte prüfen: {stat.get('betrag_pruefen', 0)}")
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(selbsttest() if "--selbsttest" in sys.argv else main(nur_ordner="--nur-ordner" in sys.argv))
+    if "--selbsttest" in sys.argv:
+        sys.exit(selbsttest())
+    if ("--diagnose" in sys.argv or "--neu-auslesen" in sys.argv) and not SB_KEY:
+        print("FEHLER: SUPABASE_SERVICE_KEY fehlt.")
+        sys.exit(2)
+    if "--diagnose" in sys.argv:
+        diagnose()
+        sys.exit(0)
+    if "--neu-auslesen" in sys.argv:
+        sys.exit(neu_auslesen())
+    sys.exit(main(nur_ordner="--nur-ordner" in sys.argv))
