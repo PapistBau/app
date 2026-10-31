@@ -1073,6 +1073,26 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 </div>
 </div>
 
+<!-- Betrag einer Eingangsrechnung prüfen / korrigieren -->
+<div class="overlay" id="modal-er-betrag" style="display:none" onclick="if(event.target===this)closeModal('modal-er-betrag')">
+<div class="modal">
+  <div class="mttl">Betrag prüfen</div>
+  <input type="hidden" id="erb-id">
+  <div style="font-size:13px;color:var(--t2);margin-bottom:6px" id="erb-info"></div>
+  <div style="font-size:12px;color:var(--orange);margin-bottom:12px" id="erb-hinweis"></div>
+  <div class="frow">
+    <div class="fg"><label class="fl">Netto (€) *</label><input type="number" class="fi" id="erb-netto" step="0.01"></div>
+    <div class="fg"><label class="fl">Brutto (€)</label><input type="number" class="fi" id="erb-brutto" step="0.01" placeholder="optional"></div>
+  </div>
+  <div class="fg"><label class="fl">Rechnungs-Nr.</label><input class="fi" id="erb-nr" placeholder="optional"></div>
+  <div class="mfooter">
+    <button class="btn btn-blue" id="erb-pdf-btn" onclick="openEingangsPdf(Number(document.getElementById('erb-id').value))">📄 PDF ansehen</button>
+    <button class="btn btn-ghost" onclick="closeModal('modal-er-betrag')">Abbrechen</button>
+    <button class="btn btn-primary" onclick="saveBetragModal()">✔ Speichern</button>
+  </div>
+</div>
+</div>
+
 <div class="overlay" id="modal-material" style="display:none" onclick="if(event.target===this)closeModal('modal-material')">
 <div class="modal">
   <div class="mttl" id="mat-mttl">Material erfassen</div>
@@ -2195,8 +2215,9 @@ function renderControlling(){
     const lohnP=workers.reduce((a,w)=>{const h=pZeit.filter(z=>z.maId===w.id).reduce((x,z)=>x+z.std,0);return a+h*(w.lohn||0);},0);
     const matNetto=pMat.reduce((a,m)=>a+m.netto,0);
     const pER=erByProj[String(p.id)]||[];
-    const erNetto=pER.reduce((a,r)=>a+(Number(r.betrag_netto)||0),0);
-    const erOhneBetrag=pER.filter(r=>r.betrag_netto==null).length;
+    // Nur gesicherte Beträge zählen (automatisch stimmig, von Andy bestätigt oder von Hand erfasst)
+    const erNetto=pER.filter(erZaehlt).reduce((a,r)=>a+(Number(r.betrag_netto)||0),0);
+    const erOhneBetrag=pER.filter(r=>!erNurInfo(r)&&!erZaehlt(r)).length;
     const deckung=(p.wertNetto||p.wert)&&rechBezP?Math.round(rechBezP/(p.wertNetto||p.wert)*100):0;
     const auftragsNetto=p.wertNetto||p.wert||0;
     const deckungsBeitrag=auftragsNetto?(auftragsNetto-matNetto-lohnP-erNetto):null;
@@ -2305,7 +2326,7 @@ function renderControlling(){
           <div><b>📊 Deckungsbeitrag</b> <span class="cp-hinweis">Auftragssumme − Lohn − Material − Eingangsrechnungen</span></div>
           <div class="cp-betrag" style="color:${deckungsBeitrag===null?'var(--t2)':deckungsBeitrag>=0?'var(--green)':'var(--red)'}">${deckungsBeitrag===null?'– (keine Auftragssumme)':num(deckungsBeitrag)+' €'}</div>
         </div>
-        ${erOhneBetrag?`<div class="cp-leer" style="padding-top:0">⚠ ${erOhneBetrag} Eingangsrechnung${erOhneBetrag!==1?'en':''} noch ohne Betrag – Ergebnis noch nicht vollständig</div>`:''}
+        ${erOhneBetrag?`<div class="cp-leer" style="padding-top:0">⚠ ${erOhneBetrag} Eingangsrechnung${erOhneBetrag!==1?'en':''} noch nicht geprüft – zählen erst nach Bestätigung, Ergebnis noch nicht vollständig</div>`:''}
       </div>
     </div>`;
   }).join('') : '<div class="empty"><div class="empty-ico">🏗</div><div class="empty-ttl">Keine aktiven Projekte in diesem Jahr</div></div>';
@@ -2370,10 +2391,12 @@ const pgEq = v => 'eq.' + encodeURIComponent('"' + String(v).replace(/\\/g,'\\\\
 
 async function loadEingangsrechnungen(){
   try{
-    const sel='id,projekt_id,ordner_name,absender,betreff,mail_datum,dateiname,storage_pfad,betrag_netto,betrag_brutto,rechnungsnummer,status';
+    const sel='id,projekt_id,ordner_name,absender,betreff,mail_datum,dateiname,storage_pfad,betrag_netto,betrag_brutto,betrag_mwst,betrag_status,betrag_hinweis,rechnungsnummer,status';
     const rows=[];
     for(let off=0;;off+=1000){
-      const r=await fetch(`${SB_URL}/rest/v1/eingangsrechnungen?select=${sel}&status=neq.geloescht&order=mail_datum.desc.nullslast,id.desc&offset=${off}&limit=1000`,{headers:sbHeaders});
+      // 'eigene' (Andys Kundenrechnungen), 'kein_beleg' (Auftragsbestätigungen usw.) und 'geloescht' sind keine Kosten;
+      // 'doppelt' und 'abgeloest' (in Schlussrechnung verrechnet) bleiben sichtbar, zählen aber nicht
+      const r=await fetch(`${SB_URL}/rest/v1/eingangsrechnungen?select=${sel}&status=in.(neu,manuell,doppelt,abgeloest)&order=mail_datum.desc.nullslast,id.desc&offset=${off}&limit=1000`,{headers:sbHeaders});
       if(!r.ok) throw new Error('eingangsrechnungen '+r.status);
       const page=await r.json(); rows.push(...page);
       if(page.length<1000) break;
@@ -2394,6 +2417,56 @@ function rechnungsfaehigeProjekte(){
     .sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'));
 }
 
+// Zählt ein Betrag im Deckungsbeitrag? Nur wenn gesichert (siehe db/008_betraege.sql)
+const erNurInfo = r => r.status==='doppelt' || r.status==='abgeloest';   // sichtbar, zählt nicht
+const erZaehlt = r => !erNurInfo(r) && r.betrag_netto!=null && ['sicher','bestaetigt','manuell'].includes(r.betrag_status);
+const eur2 = n => Number(n).toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+
+async function speichereBetrag(id, felder){
+  const res=await fetch(`${SB_URL}/rest/v1/eingangsrechnungen?id=eq.${id}`,{
+    method:'PATCH', headers:sbHeaders,
+    body:JSON.stringify({...felder, betrag_status:'bestaetigt', aktualisiert_am:new Date().toISOString()})
+  }).catch(()=>null);
+  if(!res||!res.ok){ toast('⚠ Nicht gespeichert – keine Verbindung?','var(--red)'); return false; }
+  const r=eingangsRe.find(x=>x.id===id);
+  if(r) Object.assign(r, felder, {betrag_status:'bestaetigt'});
+  return true;
+}
+
+async function bestaetigeBetrag(id){
+  const r=eingangsRe.find(x=>x.id===id);
+  if(!r||r.betrag_netto==null) return;
+  if(await speichereBetrag(id, {betrag_netto:r.betrag_netto})){ renderControlling(); toast('✔ Betrag bestätigt'); }
+}
+
+function openBetragModal(id){
+  const r=eingangsRe.find(x=>x.id===id);
+  if(!r) return;
+  document.getElementById('erb-id').value=id;
+  document.getElementById('erb-info').textContent=`${absenderName(r.absender)} · ${r.dateiname}`;
+  document.getElementById('erb-hinweis').textContent=r.betrag_hinweis?('Hinweis beim Auslesen: '+r.betrag_hinweis):'';
+  document.getElementById('erb-netto').value=r.betrag_netto!=null?r.betrag_netto:'';
+  document.getElementById('erb-brutto').value=r.betrag_brutto!=null?r.betrag_brutto:'';
+  document.getElementById('erb-nr').value=r.rechnungsnummer||'';
+  document.getElementById('erb-pdf-btn').style.display=r.storage_pfad?'':'none';
+  document.getElementById('modal-er-betrag').style.display='flex';
+}
+
+async function saveBetragModal(){
+  const id=Number(document.getElementById('erb-id').value);
+  const netto=parseFloat(document.getElementById('erb-netto').value);
+  const bruttoRoh=document.getElementById('erb-brutto').value;
+  const brutto=bruttoRoh===''?null:parseFloat(bruttoRoh);
+  if(isNaN(netto)){ toast('Bitte einen Nettobetrag eintragen','var(--orange)'); return; }
+  const felder={
+    betrag_netto:Math.round(netto*100)/100,
+    betrag_brutto:brutto==null||isNaN(brutto)?null:Math.round(brutto*100)/100,
+    rechnungsnummer:document.getElementById('erb-nr').value.trim()||null,
+  };
+  felder.betrag_mwst=felder.betrag_brutto!=null?Math.round((felder.betrag_brutto-felder.betrag_netto)*100)/100:null;
+  if(await speichereBetrag(id, felder)){ closeModal('modal-er-betrag'); renderControlling(); toast('✔ Betrag gespeichert'); }
+}
+
 function absenderName(a){
   const m=String(a||'').match(/^\s*"?([^"<]+?)"?\s*</);
   return m ? m[1] : String(a||'').replace(/[<>]/g,'');
@@ -2405,21 +2478,33 @@ function renderEingangsReSection(p, pER, erNetto, erOhneBetrag, darfHinzufuegen)
   const offen=erOffen.has(pid);
   const rows=pER.map(r=>{
     const datum=r.mail_datum?fmt(r.mail_datum.slice(0,10)):'–';
-    const betrag=r.betrag_netto!=null?num(r.betrag_netto)+' €':'<span style="color:var(--t2)">–</span>';
+    const zaehlt=erZaehlt(r);
+    const betragTxt=r.betrag_netto!=null?eur2(r.betrag_netto):'–';
+    const vorlaeufig = zaehlt && /^vorläufig/.test(r.betrag_hinweis||'');
+    const betrag=erNurInfo(r)
+      ? `<span style="color:var(--t2);text-decoration:line-through">${betragTxt}</span><div><span class="badge" style="font-size:10px;background:var(--card2);color:var(--t2)">${r.status==='doppelt'?'doppelt – zählt nicht':'in Schlussrechnung verrechnet'}</span></div>`
+      : zaehlt
+      ? `${betragTxt}${r.betrag_status==='bestaetigt'?' <span title="von dir bestätigt">✔</span>':''}${vorlaeufig?'<div><span class="badge b-blue" style="font-size:10px">vorläufig – Abschlag</span></div>':''}${r.betrag_hinweis&&/^Schlussrechnung/.test(r.betrag_hinweis)?'<div style="font-size:11px;color:var(--t2);font-weight:400">Schlussrechnung (Gesamtleistung)</div>':''}`
+      : `<span style="color:var(--orange)" title="${esc(r.betrag_hinweis||'noch nicht ausgelesen')}">${betragTxt}</span>
+         <div><span class="badge b-accent" style="font-size:10px">${r.betrag_status==='pruefen'?'bitte prüfen':'wird ausgelesen'}</span></div>
+         ${r.betrag_hinweis?`<div style="font-size:11px;color:var(--t2);font-weight:400">${esc(r.betrag_hinweis)}</div>`:''}`;
     return`<tr>
       <td style="white-space:nowrap">${datum}</td>
-      <td>${esc(absenderName(r.absender))}${r.status==='manuell'?' <span class="badge b-purple" style="font-size:10px">von Hand</span>':''}</td>
+      <td>${esc(absenderName(r.absender))}${r.status==='manuell'?' <span class="badge b-purple" style="font-size:10px">von Hand</span>':''}
+        ${r.rechnungsnummer?`<div style="font-size:11px;color:var(--t2)">Nr. ${esc(r.rechnungsnummer)}</div>`:''}</td>
       <td style="color:var(--t2)">${esc(r.betreff||'')}<div style="font-size:11px">${esc(r.dateiname)}</div></td>
       <td style="font-weight:700;white-space:nowrap">${betrag}</td>
       <td style="white-space:nowrap">
         ${r.storage_pfad?`<button class="btn btn-blue btn-sm" onclick="openEingangsPdf(${r.id})" title="PDF öffnen">📄</button>`:''}
+        ${!zaehlt&&!erNurInfo(r)&&r.betrag_netto!=null?`<button class="btn btn-primary btn-sm" onclick="bestaetigeBetrag(${r.id})" title="Vorschlag ${eur2(r.betrag_netto)} netto übernehmen">✓</button>`:''}
+        <button class="edit-btn" onclick="openBetragModal(${r.id})" title="Betrag eintragen / korrigieren">✏</button>
         <button class="del-btn" onclick="deleteEingangsRe(${r.id})" title="Aus Liste und Summen entfernen">🗑</button>
       </td>
     </tr>`;
   }).join('');
   return`<div>
     <div class="cp-zeile">
-      <div><b>Eingangsrechnungen</b> <span class="cp-hinweis">Lieferanten & Subunternehmer · ${pER.length} Stück${pER.length&&erOhneBetrag?` · ${erOhneBetrag} ohne Betrag`:''}</span></div>
+      <div><b>Eingangsrechnungen</b> <span class="cp-hinweis">Lieferanten & Subunternehmer · ${pER.length} Stück${pER.length&&erOhneBetrag?` · <span style="color:var(--orange)">${erOhneBetrag} bitte prüfen</span>`:''}</span></div>
       <div class="cp-betrag">${erNetto?num(erNetto)+' €':'–'}</div>
     </div>
     <div style="padding:0 18px 10px;display:flex;gap:8px;flex-wrap:wrap">
@@ -2517,7 +2602,7 @@ async function saveEingangsRe(){
         absender:lieferant, betreff:document.getElementById('er-beschr').value.trim()||null,
         mail_datum:datum, dateiname:datei?datei.name:'(ohne PDF)', storage_pfad:pfad,
         groesse_bytes:datei?datei.size:null, betrag_netto:Math.round(netto*100)/100,
-        rechnungsnummer:document.getElementById('er-nr').value.trim()||null, status:'manuell'
+        rechnungsnummer:document.getElementById('er-nr').value.trim()||null, status:'manuell', betrag_status:'manuell'
       })
     });
     if(!res.ok) throw new Error('insert '+res.status);
