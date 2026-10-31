@@ -1,0 +1,45 @@
+# Rechnungs-Sync: holt täglich neue Eingangsrechnungen aus rechnungen@papist-bau.de nach Supabase.
+# Zugangsdaten nur als GitHub Secrets (Settings → Secrets and variables → Actions):
+#   IMAP_USER, IMAP_PASSWORD, SUPABASE_SERVICE_KEY
+# Achtung: Das Repository ist öffentlich, die Protokolle auch → das Skript gibt nur Zahlen aus.
+name: Rechnungs-Sync
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # 04:00 UTC = 05:00 Uhr Winterzeit / 06:00 Uhr Sommerzeit
+  workflow_dispatch:       # manuell starten: Actions → Rechnungs-Sync → Run workflow
+
+permissions:
+  contents: read
+  actions: write           # nur für die Wachhalte-Schaltung unten
+
+concurrency:
+  group: rechnungs-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Selbsttest (ohne Zugangsdaten)
+        run: python3 scripts/sync_rechnungen.py --selbsttest
+
+      - name: Rechnungen abholen
+        env:
+          IMAP_HOST: imap.strato.de
+          IMAP_USER: ${{ secrets.IMAP_USER }}
+          IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
+          SUPABASE_URL: https://bthbicznechsnnowkxjz.supabase.co
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python3 scripts/sync_rechnungen.py
+
+      # GitHub schaltet zeitgesteuerte Abläufe in öffentlichen Repositories nach 60 Tagen
+      # ohne Änderung am Repository ab. Das erneute Einschalten bei jedem Lauf verhindert das.
+      - name: Wachhalten
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/sync_rechnungen.yml/enable" || true
