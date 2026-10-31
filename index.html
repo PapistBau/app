@@ -1040,6 +1040,30 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 </div>
 
 <!-- MATERIAL MODAL -->
+<!-- Eingangsrechnung von Hand erfassen (Sonderfälle) -->
+<div class="overlay" id="modal-er" style="display:none" onclick="if(event.target===this)closeModal('modal-er')">
+<div class="modal">
+  <div class="mttl">Eingangsrechnung hinzufügen</div>
+  <div style="font-size:13px;color:var(--t2);margin-bottom:12px" id="er-proj-name"></div>
+  <input type="hidden" id="er-proj">
+  <div class="frow">
+    <div class="fg"><label class="fl">Lieferant / Firma *</label><input class="fi" id="er-lieferant" placeholder="z.B. Fliesen Müller GmbH"></div>
+    <div class="fg"><label class="fl">Rechnungsdatum *</label><input type="date" class="fi" id="er-datum"></div>
+  </div>
+  <div class="frow">
+    <div class="fg"><label class="fl">Netto (€) *</label><input type="number" class="fi" id="er-netto" placeholder="0.00" step="0.01"></div>
+    <div class="fg"><label class="fl">Rechnungs-Nr.</label><input class="fi" id="er-nr" placeholder="optional"></div>
+  </div>
+  <div class="fg"><label class="fl">Beschreibung</label><input class="fi" id="er-beschr" placeholder="z.B. Nachtrag Fliesen, Barzahlung Baumarkt …"></div>
+  <div class="fg"><label class="fl">PDF (optional)</label><input type="file" class="fi" id="er-pdf" accept=".pdf,application/pdf"></div>
+  <div id="er-msg" style="font-size:13px;min-height:18px;margin-bottom:8px"></div>
+  <div class="mfooter">
+    <button class="btn btn-ghost" onclick="closeModal('modal-er')">Abbrechen</button>
+    <button class="btn btn-primary" id="er-save-btn" onclick="saveEingangsRe()">💾 Speichern</button>
+  </div>
+</div>
+</div>
+
 <div class="overlay" id="modal-material" style="display:none" onclick="if(event.target===this)closeModal('modal-material')">
 <div class="modal">
   <div class="mttl" id="mat-mttl">Material erfassen</div>
@@ -1093,6 +1117,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div class="tab active" onclick="switchCtrlTab(this,'ctrl-tab-jahr')">📅 Jahresübersicht</div>
     <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-projekte')">🏗 Je Projekt</div>
     <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-rechnungen')">🧾 Rechnungen</div>
+    <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-ordner')">📥 Rechnungsordner</div>
   </div>
   <div class="tabcontent active" id="ctrl-tab-jahr">
     <div id="ctrl-jahr-content"></div>
@@ -1102,6 +1127,9 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   </div>
   <div class="tabcontent" id="ctrl-tab-rechnungen">
     <div id="ctrl-rech-content"></div>
+  </div>
+  <div class="tabcontent" id="ctrl-tab-ordner">
+    <div id="ctrl-ordner-content"></div>
   </div>
 </div>
 
@@ -2144,6 +2172,8 @@ function renderControlling(){
   `;
 
   // ── TAB 2: JE PROJEKT ──
+  const erByProj={};
+  eingangsRe.forEach(r=>{ if(r.projekt_id!=null) (erByProj[String(r.projekt_id)]=erByProj[String(r.projekt_id)]||[]).push(r); });
   document.getElementById('ctrl-proj-content').innerHTML = aktivProjekte.length ? aktivProjekte.map(p=>{
     const sc=SC[p.typ]||SC.laufend;
     const pRech=rechnungen.filter(r=>r.projId===p.id);
@@ -2155,9 +2185,12 @@ function renderControlling(){
     const stundP=pZeit.reduce((a,z)=>a+z.std,0);
     const lohnP=workers.reduce((a,w)=>{const h=pZeit.filter(z=>z.maId===w.id).reduce((x,z)=>x+z.std,0);return a+h*(w.lohn||0);},0);
     const matNetto=pMat.reduce((a,m)=>a+m.netto,0);
+    const pER=erByProj[String(p.id)]||[];
+    const erNetto=pER.reduce((a,r)=>a+(Number(r.betrag_netto)||0),0);
+    const erOhneBetrag=pER.filter(r=>r.betrag_netto==null).length;
     const deckung=(p.wertNetto||p.wert)&&rechBezP?Math.round(rechBezP/(p.wertNetto||p.wert)*100):0;
     const auftragsNetto=p.wertNetto||p.wert||0;
-    const deckungsBeitrag=auftragsNetto?(auftragsNetto-matNetto-lohnP):null;
+    const deckungsBeitrag=auftragsNetto?(auftragsNetto-matNetto-lohnP-erNetto):null;
     const byMa={};pZeit.forEach(z=>{byMa[z.maId]=(byMa[z.maId]||0)+z.std;});
 
     // Rechnungen upload area
@@ -2195,6 +2228,7 @@ function renderControlling(){
         <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--red)">${num(matNetto)} €</div><div class="ctrl-kpi-lbl">Material Netto</div></div>
         <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--blue)">${stundP} h</div><div class="ctrl-kpi-lbl">Stunden</div></div>
         ${lohnP?`<div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--red)">${num(lohnP)} €</div><div class="ctrl-kpi-lbl">Lohnkosten</div></div>`:''}
+        ${pER.length?`<div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--red)">${erNetto?num(erNetto)+' €':pER.length}</div><div class="ctrl-kpi-lbl">${erNetto?'Eingangsrechnungen Netto':'Eingangsrechnungen'}</div></div>`:''}
         <div class="ctrl-kpi"><div class="ctrl-kpi-val">${pRech.length}</div><div class="ctrl-kpi-lbl">Rechnungen</div></div>
         ${deckungsBeitrag!==null?`<div class="ctrl-kpi" style="background:${deckungsBeitrag>=0?'rgba(63,185,80,.1)':'rgba(248,81,73,.1)'};border:1px solid ${deckungsBeitrag>=0?'rgba(63,185,80,.2)':'rgba(248,81,73,.2)'}"><div class="ctrl-kpi-val" style="color:${deckungsBeitrag>=0?'var(--green)':'var(--red)'}">${num(deckungsBeitrag)} €</div><div class="ctrl-kpi-lbl">Deckungsbeitrag</div></div>`:''}
         ${deckung?`<div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:${deckung>=100?'var(--green)':'var(--accent)'}">${deckung}%</div><div class="ctrl-kpi-lbl">Deckungsgrad</div></div>`:''}
@@ -2212,6 +2246,7 @@ function renderControlling(){
           ${pMat.length>5?`<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--t2)">+${pMat.length-5} weitere</div>`:''}
         </div>
       </div>`:''}
+      ${renderEingangsReSection(p, pER, erNetto, erOhneBetrag)}
       ${stundP>0?`
       <div style="padding:0 18px 10px">
         <div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Stunden je Mitarbeiter</div>
@@ -2294,6 +2329,259 @@ function renderControlling(){
         </tfoot>
       </table></div>` : '<div style="padding:20px;color:var(--t2);text-align:center">Keine Rechnungen in diesem Jahr</div>'}
     </div>`;
+
+  // ── TAB 4: RECHNUNGSORDNER ──
+  renderRechOrdner();
+}
+
+// ════════════════════════════════════
+// EINGANGSRECHNUNGEN (täglicher Abgleich aus rechnungen@papist-bau.de, siehe scripts/sync_rechnungen.py)
+// ════════════════════════════════════
+// Nur für den Admin. Daten liegen in eigenen Tabellen (nicht im Gerätespeicher):
+// eingangsrechnungen, rechnungsordner_mapping, rechnungs_sync_laeufe; PDFs im privaten Speicher "eingangsrechnungen".
+let eingangsRe = [], rechOrdner = [], letzterSync = null;
+const erOffen = new Set(); // aufgeklappte Rechnungslisten je Projekt
+
+// Text aus Mails (Absender, Betreff, Dateiname) sicher in HTML einsetzen
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// PostgREST-Filter "gleich" für Texte mit Sonderzeichen (Kommas, Klammern …)
+const pgEq = v => 'eq.' + encodeURIComponent('"' + String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"') + '"');
+
+async function loadEingangsrechnungen(){
+  try{
+    const sel='id,projekt_id,ordner_name,absender,betreff,mail_datum,dateiname,storage_pfad,betrag_netto,betrag_brutto,rechnungsnummer,status';
+    const rows=[];
+    for(let off=0;;off+=1000){
+      const r=await fetch(`${SB_URL}/rest/v1/eingangsrechnungen?select=${sel}&status=neq.geloescht&order=mail_datum.desc.nullslast,id.desc&offset=${off}&limit=1000`,{headers:sbHeaders});
+      if(!r.ok) throw new Error('eingangsrechnungen '+r.status);
+      const page=await r.json(); rows.push(...page);
+      if(page.length<1000) break;
+    }
+    eingangsRe=rows;
+    const m=await fetch(`${SB_URL}/rest/v1/rechnungsordner_mapping?select=*&order=ordner_name`,{headers:sbHeaders});
+    if(m.ok) rechOrdner=await m.json();
+    const l=await fetch(`${SB_URL}/rest/v1/rechnungs_sync_laeufe?select=beendet_am,neue_rechnungen,fehler&beendet_am=not.is.null&order=id.desc&limit=1`,{headers:sbHeaders});
+    if(l.ok) letzterSync=(await l.json())[0]||null;
+  }catch(e){ console.warn('Eingangsrechnungen nicht geladen', e); }
+}
+
+// Nur laufende/abgeschlossene Projekte mit gebuchten Stunden bekommen Eingangsrechnungen (Vorgabe Andy)
+function rechnungsfaehigeProjekte(){
+  const std={};
+  zeiten.forEach(z=>{ if(z.projId!=null) std[String(z.projId)]=(std[String(z.projId)]||0)+(Number(z.std)||0); });
+  return projects.filter(p=>(p.typ==='laufend'||p.typ==='abgeschlossen') && std[String(p.id)]>0)
+    .sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'));
+}
+
+function absenderName(a){
+  const m=String(a||'').match(/^\s*"?([^"<]+?)"?\s*</);
+  return m ? m[1] : String(a||'').replace(/[<>]/g,'');
+}
+
+function renderEingangsReSection(p, pER, erNetto, erOhneBetrag){
+  const pid=String(p.id);
+  const offen=erOffen.has(pid);
+  const rows=pER.map(r=>{
+    const datum=r.mail_datum?fmt(r.mail_datum.slice(0,10)):'–';
+    const betrag=r.betrag_netto!=null?num(r.betrag_netto)+' €':'<span style="color:var(--t2)">–</span>';
+    return`<tr>
+      <td style="white-space:nowrap">${datum}</td>
+      <td>${esc(absenderName(r.absender))}${r.status==='manuell'?' <span class="badge b-purple" style="font-size:10px">von Hand</span>':''}</td>
+      <td style="color:var(--t2)">${esc(r.betreff||'')}<div style="font-size:11px">${esc(r.dateiname)}</div></td>
+      <td style="font-weight:700;white-space:nowrap">${betrag}</td>
+      <td style="white-space:nowrap">
+        ${r.storage_pfad?`<button class="btn btn-blue btn-sm" onclick="openEingangsPdf(${r.id})" title="PDF öffnen">📄</button>`:''}
+        <button class="del-btn" onclick="deleteEingangsRe(${r.id})" title="Aus Liste und Summen entfernen">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+  return`<div style="border-top:1px solid var(--border)">
+    <div style="padding:12px 18px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <div style="font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.5px">
+        📥 Eingangsrechnungen (${pER.length})${erNetto?` · ${num(erNetto)} € netto`:''}${pER.length&&erOhneBetrag?` · <span style="text-transform:none;font-weight:400">${erOhneBetrag} ohne Betrag</span>`:''}
+      </div>
+      <div style="display:flex;gap:8px">
+        ${pER.length?`<button class="btn btn-ghost btn-sm" onclick="toggleEingangsRe('${pid}')">${offen?'▲ Ausblenden':'▼ Anzeigen'}</button>`:''}
+        <button class="btn btn-primary btn-sm" onclick="openEingangsReModal(${p.id})">＋ Hinzufügen</button>
+      </div>
+    </div>
+    ${pER.length&&offen?`<div style="overflow-x:auto;padding:0 0 8px">
+      <table class="ctrl-table">
+        <thead><tr><th>Datum</th><th>Absender</th><th>Betreff / Datei</th><th>Netto</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`:''}
+  </div>`;
+}
+
+function toggleEingangsRe(pid){
+  if(erOffen.has(pid)) erOffen.delete(pid); else erOffen.add(pid);
+  renderControlling();
+}
+
+async function openEingangsPdf(id){
+  const r=eingangsRe.find(x=>x.id===id);
+  if(!r||!r.storage_pfad) return;
+  const fenster=window.open('','_blank'); // sofort öffnen, sonst blockiert der Browser das Fenster
+  try{
+    const pfad=r.storage_pfad.split('/').map(encodeURIComponent).join('/');
+    const res=await fetch(`${SB_URL}/storage/v1/object/sign/eingangsrechnungen/${pfad}`,{
+      method:'POST', headers:sbHeaders, body:JSON.stringify({expiresIn:600})
+    });
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok||!d.signedURL) throw new Error('sign '+res.status);
+    fenster.location=SB_URL+'/storage/v1'+d.signedURL;
+  }catch(e){
+    if(fenster) fenster.close();
+    toast('⚠ PDF konnte nicht geöffnet werden','var(--red)');
+  }
+}
+
+function deleteEingangsRe(id){
+  const r=eingangsRe.find(x=>x.id===id);
+  if(!r) return;
+  confirmDelete('Rechnung entfernen?',
+    `„${r.dateiname}“ wird aus Liste und Summen entfernt. Die Mail im Postfach bleibt unberührt und wird nicht erneut übernommen.`,
+    async ()=>{
+      const res=await fetch(`${SB_URL}/rest/v1/eingangsrechnungen?id=eq.${r.id}`,{
+        method:'PATCH', headers:sbHeaders,
+        body:JSON.stringify({status:'geloescht', aktualisiert_am:new Date().toISOString()})
+      }).catch(()=>null);
+      if(!res||!res.ok){ toast('⚠ Nicht entfernt – keine Verbindung?','var(--red)'); return; }
+      eingangsRe=eingangsRe.filter(x=>x.id!==r.id);
+      renderControlling();
+      toast('🗑 Rechnung entfernt');
+    });
+}
+
+function openEingangsReModal(projId){
+  const p=projects.find(x=>x.id===projId);
+  document.getElementById('er-proj').value=projId;
+  document.getElementById('er-proj-name').textContent=p?('Projekt: '+p.name):'';
+  ['er-lieferant','er-netto','er-nr','er-beschr'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('er-datum').value=today();
+  document.getElementById('er-pdf').value='';
+  document.getElementById('er-msg').textContent='';
+  document.getElementById('modal-er').style.display='flex';
+}
+
+async function saveEingangsRe(){
+  const msg=document.getElementById('er-msg');
+  const btn=document.getElementById('er-save-btn');
+  const projId=Number(document.getElementById('er-proj').value);
+  const lieferant=document.getElementById('er-lieferant').value.trim();
+  const datum=document.getElementById('er-datum').value;
+  const netto=parseFloat(document.getElementById('er-netto').value);
+  const datei=document.getElementById('er-pdf').files[0];
+  msg.style.color='var(--red)';
+  if(!lieferant||!datum||isNaN(netto)){ msg.textContent='Bitte Lieferant, Datum und Netto ausfüllen.'; return; }
+  if(datei&&datei.size>25*1024*1024){ msg.textContent='PDF ist größer als 25 MB.'; return; }
+
+  btn.disabled=true; msg.style.color='var(--t2)'; msg.textContent='⏳ Speichere …';
+  try{
+    let pfad=null;
+    if(datei){
+      pfad=`manuell/${crypto.randomUUID()}.pdf`;
+      const up=await fetch(`${SB_URL}/storage/v1/object/eingangsrechnungen/${pfad}`,{
+        method:'POST', headers:{...sbHeaders,'Content-Type':'application/pdf'}, body:datei
+      });
+      if(!up.ok) throw new Error('upload '+up.status);
+    }
+    const res=await fetch(`${SB_URL}/rest/v1/eingangsrechnungen`,{
+      method:'POST', headers:{...sbHeaders,'Prefer':'return=representation'},
+      body:JSON.stringify({
+        projekt_id:projId, ordner_name:'(manuell)', message_id:'manuell-'+crypto.randomUUID(),
+        absender:lieferant, betreff:document.getElementById('er-beschr').value.trim()||null,
+        mail_datum:datum, dateiname:datei?datei.name:'(ohne PDF)', storage_pfad:pfad,
+        groesse_bytes:datei?datei.size:null, betrag_netto:Math.round(netto*100)/100,
+        rechnungsnummer:document.getElementById('er-nr').value.trim()||null, status:'manuell'
+      })
+    });
+    if(!res.ok) throw new Error('insert '+res.status);
+    const neu=(await res.json())[0];
+    eingangsRe.unshift(neu);
+    erOffen.add(String(projId));
+    closeModal('modal-er');
+    renderControlling();
+    toast('✅ Rechnung hinzugefügt');
+  }catch(e){
+    console.warn(e);
+    msg.style.color='var(--red)'; msg.textContent='⚠ Nicht gespeichert – bitte erneut versuchen.';
+  }finally{ btn.disabled=false; }
+}
+
+// ── Reiter „Rechnungsordner“: Postfach-Ordner einem Projekt zuordnen ──
+function renderRechOrdner(){
+  const el=document.getElementById('ctrl-ordner-content');
+  if(!el) return;
+  const erlaubt=rechnungsfaehigeProjekte();
+  const anzahl={};
+  eingangsRe.forEach(r=>{ anzahl[r.ordner_name]=(anzahl[r.ordner_name]||0)+1; });
+  const status=o=> o.quelle==='manuell' ? (o.projekt_id!=null?'zugeordnet':'ignoriert') : 'offen';
+  const rang={offen:0, zugeordnet:1, ignoriert:2};
+  const liste=[...rechOrdner].sort((a,b)=>rang[status(a)]-rang[status(b)] || a.ordner_name.localeCompare(b.ordner_name,'de',{numeric:true}));
+  const badge={offen:'<span class="badge b-accent">offen</span>', zugeordnet:'<span class="badge b-green">zugeordnet</span>', ignoriert:'<span class="badge" style="background:var(--card2);color:var(--t2)">ignoriert</span>'};
+  const syncTxt=letzterSync
+    ? `Letzter Abgleich: ${new Date(letzterSync.beendet_am).toLocaleString('de-DE',{dateStyle:'short',timeStyle:'short'})} · ${letzterSync.neue_rechnungen||0} neue Rechnungen${letzterSync.fehler?' · <span style="color:var(--red)">mit Fehler</span>':''}`
+    : 'Noch kein Abgleich';
+
+  el.innerHTML=`<div class="ctrl-section">
+    <div class="ctrl-section-title"><span>📥</span> Rechnungsordner im Postfach rechnungen@papist-bau.de</div>
+    <div style="font-size:13px;color:var(--t2);margin-bottom:12px;line-height:1.6">
+      ${syncTxt}. Der Abgleich läuft täglich gegen 5 Uhr.<br>
+      Rechnungen werden nur aus <b>zugeordneten</b> Ordnern übernommen – beim nächsten Abgleich, auch rückwirkend.
+      Zur Auswahl stehen nur laufende und abgeschlossene Projekte mit gebuchten Stunden.
+    </div>
+    <div style="overflow-x:auto"><table class="ctrl-table">
+      <thead><tr><th>Ordner</th><th>Status</th><th>Projekt</th><th></th></tr></thead>
+      <tbody>${liste.map((o,i)=>{
+        const st=status(o);
+        const vorwahl=o.projekt_id ?? (st==='offen'?o.vorschlag_projekt_id:null);
+        return`<tr>
+          <td>${esc(o.ordner_name)}${anzahl[o.ordner_name]?`<div style="font-size:11px;color:var(--t2)">${anzahl[o.ordner_name]} Rechnungen übernommen</div>`:''}</td>
+          <td>${badge[st]}${st==='offen'&&o.vorschlag_projekt_id?'<div style="font-size:11px;color:var(--t2)">mit Vorschlag</div>':''}</td>
+          <td><select class="fs" id="ro-sel-${i}" style="min-width:220px;padding:6px 8px">
+            <option value="">— Projekt wählen —</option>
+            ${erlaubt.map(p=>`<option value="${p.id}" ${String(p.id)===String(vorwahl)?'selected':''}>${esc(p.name)}</option>`).join('')}
+          </select></td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-primary btn-sm" onclick="saveRechOrdner(${i},'zuordnen')">✓ Zuordnen</button>
+            ${st!=='ignoriert'?`<button class="btn btn-ghost btn-sm" onclick="saveRechOrdner(${i},'ignorieren')">Ignorieren</button>`:''}
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  </div>`;
+  el._liste=liste;
+}
+
+async function saveRechOrdner(i, aktion){
+  const o=document.getElementById('ctrl-ordner-content')._liste[i];
+  if(!o) return;
+  let projektId=null;
+  if(aktion==='zuordnen'){
+    projektId=Number(document.getElementById('ro-sel-'+i).value)||null;
+    if(!projektId){ toast('Bitte zuerst ein Projekt wählen','var(--orange)'); return; }
+  }
+  const jetzt=new Date().toISOString();
+  try{
+    const r1=await fetch(`${SB_URL}/rest/v1/rechnungsordner_mapping?ordner_name=${pgEq(o.ordner_name)}`,{
+      method:'PATCH', headers:sbHeaders, body:JSON.stringify({projekt_id:projektId, quelle:'manuell', aktualisiert_am:jetzt})
+    });
+    if(!r1.ok) throw new Error('mapping '+r1.status);
+    // bereits übernommene Rechnungen des Ordners sofort mitziehen (bzw. bei „ignorieren“ ausblenden)
+    const r2=await fetch(`${SB_URL}/rest/v1/eingangsrechnungen?ordner_name=${pgEq(o.ordner_name)}`,{
+      method:'PATCH', headers:sbHeaders, body:JSON.stringify({projekt_id:projektId, aktualisiert_am:jetzt})
+    });
+    if(!r2.ok) throw new Error('rechnungen '+r2.status);
+    o.projekt_id=projektId; o.quelle='manuell';
+    eingangsRe.forEach(r=>{ if(r.ordner_name===o.ordner_name) r.projekt_id=projektId; });
+    renderControlling();
+    toast(aktion==='zuordnen'?'✅ Ordner zugeordnet – Rechnungen kommen beim nächsten Abgleich':'Ordner wird ignoriert');
+  }catch(e){
+    console.warn(e);
+    toast('⚠ Nicht gespeichert – keine Verbindung?','var(--red)');
+  }
 }
 
 async function handleCtrlPdfUpload(e, defaultProjId){
@@ -6398,6 +6686,7 @@ function clearLocalData(){
   ['bm_proj','bm_ma','bm_zeit','bm_rech','bm_todos','bm_fotos','bm_kat','bm_allgtodos','bm_material','bm_deleted','bm_last_save']
     .forEach(k=>localStorage.removeItem(k));
   projects=[]; workers=[]; zeiten=[]; rechnungen=[]; todos=[]; fotos=[]; kategorien=[]; allgTodos=[]; material=[];
+  eingangsRe=[]; rechOrdner=[]; letzterSync=null;
 }
 
 function maSitzungAbgelaufen(){
@@ -7153,6 +7442,8 @@ async function loadFromCloud(){
     setSyncStatus('offline');
     toast('⚠ Offline – lokale Daten werden verwendet','var(--orange)');
   }
+  // Eingangsrechnungen (eigene Tabellen, nur Admin) – nicht im Gerätespeicher
+  await loadEingangsrechnungen();
 }
 
 
