@@ -412,7 +412,8 @@ def selbsttest():
     assert vorschlag_projekt("76 Amperweg 13 Tassilobau Kirchheim", projekte) == 10
     assert vorschlag_projekt("74 Harlaching Tassilobau Meichelbeckstr", projekte) == 11
     assert vorschlag_projekt("03 BV Hauber Murnau", projekte) == 12
-    assert vorschlag_projekt("59 Aschheim Bauer Apartments", projekte) is None  # zwei ähnliche → kein Vorschlag
+    assert vorschlag_projekt("59 Aschheim Bauer Apartments", projekte) == 13    # Apartments ≈ Apartmenthaus
+    assert vorschlag_projekt("05 BV Bauer Aschheim", projekte) is None          # zwei ähnliche → kein Vorschlag
     assert vorschlag_projekt("12 BV Schmidt", projekte) is None                 # kein Treffer
     assert vorschlag_projekt("0000 Archiv", projekte) is None
 
