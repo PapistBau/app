@@ -312,6 +312,16 @@ def kandidaten(text):
             b = BETRAG_RE.search(zeile[m.end():])
             if b:
                 gefunden["zu_zahlen"].append(zahl(b.group(0)))
+        # Summenzeile in Spalten „Netto | MwSt | Brutto“ (Überschrift steht oben, z. B. „Rechnungssumme 11.521,42 0,00 11.521,42“):
+        # beschriftete Zeile mit drei Beträgen, bei der Netto + MwSt = Brutto gilt. Unbeschriftete Positionszeilen zählen nicht.
+        werte = [zahl(b.group(0)) for b in BETRAG_RE.finditer(zeile)]
+        if len(werte) >= 3 and (re.search(LABELS["netto"], klein) or re.search(LABELS["brutto"], klein)
+                                or re.search(ZU_ZAHLEN, klein)):
+            a, m_, c = werte[-3:]
+            if a > 0 and c > 0 and m_ >= 0 and abs(a + m_ - c) <= 0.02:
+                gefunden["netto"].append(a)
+                gefunden["mwst"].append(m_)
+                gefunden["brutto"].append(c)
         for art, muster in LABELS.items():
             for m in re.finditer(muster, klein):
                 rest = zeile[m.end():]
@@ -1007,6 +1017,11 @@ def selbsttest():
     # Positionen mit 19 % ausgewiesen, Summenzeile mit 0 % MwSt → die Summenzeile gilt
     e = betrag_aus_text("Beispiel Fenster\nSchlussrechnung 9200777\nPos 1 Netto 1.000,00 MwSt 190,00 Brutto 1.190,00\n"
                         "Summe Netto 5.000,00 MwSt 0,00 Brutto 5.000,00\nabzgl. RE 600.0002 3.000,00\nRest 2.000,00")
+    assert (e["gesamt"], e["zahl"]) == (5000.0, 2000.0), e
+    # Summentabelle mit Spaltenüberschrift oben und Füllzeile dazwischen (Muster aus der Prüfung)
+    e = betrag_aus_text("Beispiel Fenster\nSchlussrechnung 9200888\nPos 1 Fenster\n1.000,00 € 190,00 € 1.190,00 €\n"
+                        "Netto 19% MwSt Brutto\n0 1 2 3\nRechnungssumme 5.000,00 € 0,00 € 5.000,00 €\n"
+                        "abzgl. RE 600.0003 vom 01.05.2026 3.000,00 € 0,00 € - 3.000,00 €\nRestbetrag 2.000,00 € 0,00 € 2.000,00 €")
     assert (e["gesamt"], e["zahl"]) == (5000.0, 2000.0), e
     assert beleg_art("Musterfirma\nRechnung 9200001") == "rechnung"
     assert beleg_art("", "Bestätigung und Anzahlungsrechnung", "7301234 AB Muster.pdf") == "kein_beleg"
