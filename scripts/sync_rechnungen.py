@@ -271,11 +271,12 @@ LABELS = {
              r"(?:summe|betrag|gesamt)\s+ohne\s+(?:mwst|ust|umsatzsteuer|mehrwertsteuer)",
     "mwst": r"mwst|mw\.?\s*-?st|mehrwertsteuer|umsatzsteuer|\bust\b|\bsteuer\b",
     "brutto": r"brutto(?:betrag|summe)?|gesamtbetrag|rechnungsbetrag|rechnungssumme|endbetrag|zu\s+zahlen|zahlbetrag|"
-              r"gesamtsumme|summe\s+brutto|\btotal\b|zahlbar|summe\s+inkl|betrag\s+inkl|"
+              r"gesamtsumme|summe\s+brutto|\btotal\b|zahlbar|summe\s+inkl|betrag\s+inkl|rechnungswert|forderungsbetrag|"
               r"\bsumme\b(?!\s+(?:netto|ohne|der\s+positionen))",
 }
-ZU_ZAHLEN = r"zu\s+zahlen|zahlbetrag|zahlbar|auszahlungsbetrag|restbetrag"
-ABSCHLAG = r"abschlag|abzügl|abzgl|bereits\s+(?:gezahlt|bezahlt|berechnet)|bisher\s+(?:gezahlt|berechnet|abgerechnet)|teilzahlung"
+ZU_ZAHLEN = r"zu\s+zahlen|zahlbetrag|zahlbar|auszahlungsbetrag|restbetrag|forderungsbetrag"
+ABSCHLAG = (r"abschlag|abzügl|abzgl|bereits\s+(?:gezahlt|bezahlt|berechnet)|bisher\s+(?:gezahlt|berechnet|abgerechnet)|"
+            r"teilzahlung|anzahlung")
 NR_RE = re.compile(r"(?:rechnungs?\s*-?\s*(?:nr|nummer)|rg\.?\s*-?\s*nr|beleg\s*-?\s*nr)\.?\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9\-/._]{2,30})",
                    re.IGNORECASE)
 
@@ -384,7 +385,16 @@ def betrag_aus_text(text):
         # 2) §13b: keine MwSt, Netto = Rechnungsbetrag
         p13b = "13b" in klein or "steuerschuldnerschaft" in klein or "reverse charge" in klein
         endbetraege = sorted(netto_k | brutto_k)
-        if p13b and endbetraege:
+        if p13b and endbetraege and abschlag:
+            # §13b-Schlussrechnung mit abgezogenen Anzahlungen: es zählt nur der noch zu zahlende Betrag,
+            # die Anzahlungsrechnungen sind selbst schon erfasst (sonst doppelt)
+            if len(zu_zahlen) == 1:
+                wert = next(iter(zu_zahlen))
+                erg.update(netto=wert, brutto=wert, mwst=0.0, status="sicher",
+                           hinweis="§13b, abzüglich Anzahlungen: Forderungsbetrag")
+            else:
+                erg.update(netto=min(endbetraege), hinweis="§13b mit Anzahlungen – welcher Betrag gilt? bitte prüfen")
+        elif p13b and endbetraege:
             if len(endbetraege) == 1 or (netto_k & brutto_k):
                 wert = max(netto_k & brutto_k) if netto_k & brutto_k else endbetraege[0]
                 erg.update(netto=wert, brutto=wert, mwst=0.0, status="sicher", hinweis="§13b (ohne MwSt)")
@@ -396,7 +406,7 @@ def betrag_aus_text(text):
         elif netto_k:
             erg.update(netto=max(netto_k), hinweis="nur Nettobetrag gefunden")
         else:
-            erg["hinweis"] = "kein Betrag gefunden"
+            erg["hinweis"] = "kein Betrag gefunden – evtl. keine Rechnung (Lieferschein, Datenblatt …)"
 
     if "gutschrift" in klein:
         erg["status"] = "pruefen"
@@ -696,6 +706,13 @@ def selbsttest():
     assert e["status"] == "pruefen" and "Abschlag" in e["hinweis"], e  # Gesamtleistung darf NICHT sicher zählen
     e = betrag_aus_text("Abschlagsrechnung Nr. 3 Beispielbau\nNetto 10.000,00\nMwSt 1.900,00\nzu zahlen 11.900,00")
     assert (e["status"], e["netto"]) == ("sicher", 10000.0), e
+    e = betrag_aus_text("Beispiel Fenster GmbH\nZwischensumme 1.985,00\nÜbertrag 1.985,00\nGesamtbetrag* 2.359,40\n"
+                        "*Steuerschuldnerschaft des Leistungsempfängers (Reverse Charge)\n"
+                        "Abzüglich erhaltener Abschlagszahlungen Brutto €\n1. Anzahlungsrechnung vom 01.09.2026 -1.179,70\n"
+                        "Forderungsbetrag* 1.179,70")
+    assert (e["status"], e["netto"], e["mwst"]) == ("sicher", 1179.7, 0.0), e  # §13b: nur Forderungsbetrag
+    e = betrag_aus_text("Beispielhersteller\nWarenwert : 216,60 EUR\n19,00 % MwSt. : 41,15 EUR\nRechnungswert : 257,75 EUR")
+    assert (e["status"], e["netto"]) == ("sicher", 216.6), e
 
     print("Selbsttest OK")
     return 0
