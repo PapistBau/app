@@ -87,6 +87,13 @@ def pg_eq(wert):
     return "eq." + urllib.parse.quote('"' + wert.replace("\\", "\\\\").replace('"', '\\"') + '"', safe="")
 
 
+def sb_download_pdf(path):
+    req = urllib.request.Request(f"{SB_URL}/storage/v1/object/{BUCKET}/{urllib.parse.quote(path)}",
+                                 headers={"apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY})
+    with urllib.request.urlopen(req, timeout=60) as res:
+        return res.read()
+
+
 def sb_upload_pdf(path, data):
     sb_request("POST", f"/storage/v1/object/{BUCKET}/{urllib.parse.quote(path)}",
                raw=data, headers={"Content-Type": "application/pdf", "x-upsert": "true"})
@@ -252,6 +259,125 @@ def vorschlag_projekt(ordner, projekte):
 
 
 # ════════════════════════════════════
+# Beträge aus dem PDF-Text (Teil D)
+# ════════════════════════════════════
+# Grundsatz (Vorgabe Andy: im Zweifel fragen): 'sicher' nur, wenn die Zahlen rechnerisch zusammenpassen
+# (Netto + MwSt = Brutto bei 19 % / 7 %) oder bei §13b (keine MwSt) ein eindeutiger Endbetrag da ist.
+# Alles andere → 'pruefen' (mit Vorschlag, falls vorhanden); zählt erst nach Bestätigung in der App.
+
+BETRAG_RE = re.compile(r"(?<![\d.,])-?\d{1,3}(?:\.\d{3})*,\d{2}(?!\d)(?!\s*%)|(?<![\d.,])-?\d+,\d{2}(?!\d)(?!\s*%)")
+LABELS = {
+    "netto": r"netto(?:betrag|summe|wert)?|summe\s+netto|gesamt\s*netto|warenwert|zwischensumme",
+    "mwst": r"mwst|mw\.?\s*-?st|mehrwertsteuer|umsatzsteuer|\bust\b",
+    "brutto": r"brutto(?:betrag|summe)?|gesamtbetrag|rechnungsbetrag|rechnungssumme|endbetrag|zu\s+zahlen|zahlbetrag|"
+              r"gesamtsumme|summe\s+brutto|\btotal\b|zahlbar",
+}
+NR_RE = re.compile(r"(?:rechnungs?\s*-?\s*(?:nr|nummer)|rg\.?\s*-?\s*nr|beleg\s*-?\s*nr)\.?\s*[:#]?\s*([A-Za-z0-9][A-Za-z0-9\-/._]{2,30})",
+                   re.IGNORECASE)
+
+
+def zahl(s):
+    return round(float(s.replace(".", "").replace(",", ".")), 2)
+
+
+def kandidaten(text):
+    """Findet je Art (netto/mwst/brutto) die Beträge, die hinter einer passenden Beschriftung stehen."""
+    gefunden = {k: [] for k in LABELS}
+    zeilen = [z.strip() for z in text.splitlines()]
+    for i, zeile in enumerate(zeilen):
+        klein = zeile.lower()
+        for art, muster in LABELS.items():
+            for m in re.finditer(muster, klein):
+                rest = zeile[m.end():]
+                b = BETRAG_RE.search(rest)
+                if not b and i + 1 < len(zeilen) and not BETRAG_RE.search(zeile[:m.start()]):
+                    b = BETRAG_RE.search(zeilen[i + 1])  # Betrag steht in der nächsten Zeile
+                if b:
+                    gefunden[art].append(zahl(b.group(0)))
+    return gefunden
+
+
+def betrag_aus_text(text):
+    """Liefert dict mit netto, mwst, brutto, nr, status ('sicher'/'pruefen') und hinweis."""
+    erg = {"netto": None, "mwst": None, "brutto": None, "nr": None, "status": "pruefen", "hinweis": None}
+    if not text or len(text.strip()) < 20:
+        erg["hinweis"] = "kein lesbarer Text (evtl. Scan)"
+        return erg
+    nr = NR_RE.search(text)
+    if nr:
+        erg["nr"] = nr.group(1).strip(".-/")
+    klein = text.lower()
+    k = kandidaten(text)
+    netto_k, mwst_k, brutto_k = set(k["netto"]), set(k["mwst"]), set(k["brutto"])
+
+    # 1) Rechnerisch stimmige Kombination suchen (größter Brutto-Betrag = Endsumme)
+    passend = []
+    for n in netto_k:
+        for b in brutto_k:
+            if n <= 0 or b <= 0:
+                continue
+            for satz in (0.19, 0.07):
+                if abs(n * (1 + satz) - b) <= max(0.02, b * 0.0002):
+                    passend.append((b, n))
+            for m in mwst_k:
+                if m > 0 and abs(n + m - b) <= 0.02:
+                    passend.append((b, n))
+    if passend:
+        b, n = max(passend)
+        erg.update(netto=n, brutto=b, mwst=round(b - n, 2), status="sicher")
+    else:
+        # 2) §13b: keine MwSt, Netto = Rechnungsbetrag
+        p13b = "13b" in klein or "steuerschuldnerschaft" in klein or "reverse charge" in klein
+        endbetraege = sorted(netto_k | brutto_k)
+        if p13b and endbetraege:
+            if len(endbetraege) == 1 or (netto_k & brutto_k):
+                wert = max(netto_k & brutto_k) if netto_k & brutto_k else endbetraege[0]
+                erg.update(netto=wert, brutto=wert, mwst=0.0, status="sicher", hinweis="§13b (ohne MwSt)")
+            else:
+                erg.update(netto=max(endbetraege), hinweis="§13b, mehrere mögliche Beträge")
+        elif brutto_k:
+            b = max(brutto_k)
+            erg.update(brutto=b, netto=round(b / 1.19, 2), hinweis="nur Bruttobetrag gefunden, Netto mit 19 % geschätzt")
+        elif netto_k:
+            erg.update(netto=max(netto_k), hinweis="nur Nettobetrag gefunden")
+        else:
+            erg["hinweis"] = "kein Betrag gefunden"
+
+    if "gutschrift" in klein:
+        erg["status"] = "pruefen"
+        erg["hinweis"] = "Gutschrift – bitte prüfen" + (f" ({erg['hinweis']})" if erg["hinweis"] else "")
+    return erg
+
+
+def pdf_text(data):
+    import io
+    import pdfplumber  # wird im GitHub-Ablauf installiert (siehe Workflow)
+    teile = []
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        for seite in pdf.pages[:10]:
+            teile.append(seite.extract_text() or "")
+    return "\n".join(teile)
+
+
+def betraege_auslesen(stat, maximal=1500):
+    """Liest für alle Rechnungen ohne Betrag-Status den Betrag aus dem PDF."""
+    offen = sb_select_all("eingangsrechnungen", "id,storage_pfad",
+                          "&betrag_status=is.null&status=eq.neu&storage_pfad=not.is.null&order=id")
+    for r in offen[:maximal]:
+        try:
+            erg = betrag_aus_text(pdf_text(sb_download_pdf(r["storage_pfad"])))
+        except Exception as e:  # noqa: BLE001 – defektes PDF o. ä.
+            erg = {"netto": None, "mwst": None, "brutto": None, "nr": None, "status": "pruefen",
+                   "hinweis": f"PDF nicht lesbar ({type(e).__name__})"}
+        body = {"betrag_netto": erg["netto"], "betrag_mwst": erg["mwst"], "betrag_brutto": erg["brutto"],
+                "betrag_status": erg["status"], "betrag_hinweis": erg["hinweis"], "betrag_ausgelesen_am": jetzt()}
+        if erg["nr"]:
+            body["rechnungsnummer"] = erg["nr"][:100]
+        sb_request("PATCH", f"/rest/v1/eingangsrechnungen?id=eq.{int(r['id'])}", body=body)
+        stat["betrag_" + erg["status"]] = stat.get("betrag_" + erg["status"], 0) + 1
+
+
+# ════════════════════════════════════
 # Hauptablauf
 # ════════════════════════════════════
 
@@ -381,6 +507,10 @@ def main(nur_ordner=False):
             except Exception:
                 pass
 
+        # Teil D: Beträge aus neuen PDFs lesen
+        if not nur_ordner:
+            betraege_auslesen(stat)
+
         # Bestätigte Zuordnungen auf alle Rechnungen des Ordners anwenden (z. B. nach Änderung in der App)
         for ordner in mapping:
             pid = bestaetigtes_projekt(ordner)
@@ -400,7 +530,8 @@ def main(nur_ordner=False):
     print(f"Modus: {'nur Ordner erfassen' if nur_ordner else 'Rechnungen abholen'} | Ordner: {stat['ordner']} "
           f"(bestätigt: {stat['bestaetigt']}, offen: {stat['offen']}, ignoriert: {stat['ignoriert']}, neu erfasst: {stat['neue_ordner']}) | "
           f"Mails geprüft: {stat['mails']} | neue Rechnungen (PDFs): {stat['neue_rechnungen']} | "
-          f"Mails ohne PDF: {stat['ohne_pdf']} | verschoben: {stat['verschoben']}")
+          f"Mails ohne PDF: {stat['ohne_pdf']} | verschoben: {stat['verschoben']} | "
+          f"Beträge sicher: {stat.get('betrag_sicher', 0)}, bitte prüfen: {stat.get('betrag_pruefen', 0)}")
     return 1 if fehler else 0
 
 
@@ -453,6 +584,28 @@ def selbsttest():
     ])
     assert [o for _, o in ordner] == [OHNE_ORDNER, "76 Lindenweg 13 Musterbau Feldkirchen", "47 Kaufmann",
                                       "50 Weber Badsanierung"], ordner
+    # Beträge – ausgedachte Beispielrechnungen
+    e = betrag_aus_text("Musterfirma GmbH\nRechnung Nr. RE-2026-0815\nPosition 1 Fliesen 1.000,00\n"
+                        "Nettobetrag 1.000,00 €\nMwSt 19 % 190,00 €\nGesamtbetrag 1.190,00 €")
+    assert (e["status"], e["netto"], e["mwst"], e["brutto"], e["nr"]) == ("sicher", 1000.0, 190.0, 1190.0, "RE-2026-0815"), e
+    e = betrag_aus_text("Rechnungsnummer: 4711\nSumme netto 2.500,00\n"
+                        "Steuerschuldnerschaft des Leistungsempfängers gem. §13b UStG\nRechnungsbetrag 2.500,00")
+    assert (e["status"], e["netto"], e["mwst"]) == ("sicher", 2500.0, 0.0), e
+    e = betrag_aus_text("Beispiel Baustoffe\nVielen Dank für Ihren Einkauf\nGesamtbetrag 119,00 EUR")
+    assert (e["status"], e["netto"], e["brutto"]) == ("pruefen", 100.0, 119.0), e
+    e = betrag_aus_text("")
+    assert (e["status"], e["netto"]) == ("pruefen", None), e
+    e = betrag_aus_text("Leistungszeitraum Oktober\nMwSt 19,00 % 38,00\nNetto 200,00\nBrutto 238,00")
+    assert (e["status"], e["netto"]) == ("sicher", 200.0), e
+    e = betrag_aus_text("Kleinrechnung Material Musterlager\nNetto 50,00 MwSt 9,50 Brutto 59,50")
+    assert (e["status"], e["netto"], e["brutto"]) == ("sicher", 50.0, 59.5), e
+    e = betrag_aus_text("Lieferung Beispielware\nNettobetrag 100,00\n7% MwSt 7,00\nEndbetrag 107,00")
+    assert (e["status"], e["netto"]) == ("sicher", 100.0), e
+    e = betrag_aus_text("Gutschrift Nr. G-12 für Rücksendung\nNetto 100,00\nMwSt 19,00\nBrutto 119,00")
+    assert e["status"] == "pruefen" and "Gutschrift" in e["hinweis"], e
+    e = betrag_aus_text("Rechnung über Beispielarbeiten\nNetto 1.000,00\nBrutto 1.500,00")  # passt nicht zusammen
+    assert e["status"] == "pruefen", e
+
     print("Selbsttest OK")
     return 0
 
