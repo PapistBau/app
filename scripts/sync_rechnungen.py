@@ -359,6 +359,16 @@ def ziffern(s):
     return re.sub(r"\D", "", s or "")
 
 
+# Rechnungsnummer am Ende des Dateinamens, z. B. „Muster Bau_RE0020.pdf“ und die korrigierte Fassung „…_RE0020-1.pdf“
+DATEINAME_NR_RE = re.compile(r"(?:^|[^a-z0-9])(?:re|rg|rn|rechnung|rechnungsnr|invoice)[\s._-]*(\d{3,})"
+                             r"(?:\s*\(\d{1,2}\)|[-_]\d{1,2})?\.pdf$", re.IGNORECASE)
+
+
+def dateiname_nr(dateiname):
+    m = DATEINAME_NR_RE.search(dateiname or "")
+    return m.group(1) if m else None
+
+
 def beleg_art(text, betreff="", dateiname=""):
     kopf = "\n".join([z for z in (text or "").splitlines() if z.strip()][:15]).lower()
     for quelle in (kopf, (dateiname or "").lower(), (betreff or "").lower()):
@@ -406,7 +416,7 @@ def betrag_aus_text(text, betreff="", dateiname=""):
     mwst, brutto, nr, status ('sicher'/'pruefen') und hinweis. Die Verrechnung von Abschlägen mit
     Schlussrechnungen passiert danach je Projekt in verrechne_projekt()."""
     erg = _betrag_aus_pdf(text)
-    # Betrag im Dateinamen (Andy schreibt ihn oft hinein, z. B. „OBI 28.07.26 78,94€ Husel.pdf“) als Abgleich
+    # Betrag im Dateinamen (Andy schreibt ihn oft hinein, z. B. „Baumarkt 28.07.26 78,94€ Muster.pdf“) als Abgleich
     namens_betraege = [zahl(b.group(0)) for b in BETRAG_RE.finditer(dateiname or "")]
     if namens_betraege:
         nb = namens_betraege[-1]
@@ -640,8 +650,19 @@ def verrechne_projekt(rows, eigene_ids):
             setze(r, status="doppelt", betrag_hinweis=f"doppelt (gleicher Beleg wie Nr. {frueher})")
         for s in schluessel:
             gesehen.setdefault(s, r["id"])
+    # 6b) PDF ohne Belegnummer, aber gleiche Rechnungsnummer im Dateinamen desselben Lieferanten
+    #     („…_RE0020.pdf“ und „…_RE0020-1.pdf“) → die neuere Fassung zählt, die ältere ist doppelt
+    fassungen = {}
+    for r in rows:
+        nr = dateiname_nr(r.get("dateiname"))
+        if r["status"] == "neu" and not r.get("belegnr") and r.get("lieferant") and nr:
+            fassungen.setdefault((r["lieferant"], nr), []).append(r)
+    for (_, nr), liste in fassungen.items():
+        liste.sort(key=lambda x: (x.get("mail_datum") or "", x["id"]))
+        for alt in liste[:-1]:
+            setze(alt, status="doppelt", betrag_hinweis=f"ältere Fassung von Nr. {liste[-1]['id']} (Rechnungsnr. {nr} im Dateinamen)")
 
-    aktiv = [r for r in rows if r["status"] == "neu"]
+    aktiv =[r for r in rows if r["status"] == "neu"]
     nummern = {r["belegnr"] for r in aktiv if r.get("belegnr")}
 
     def eigen(r):  # Betrag dieses Belegs; Korrekturen/Stornos mindern
@@ -713,7 +734,7 @@ def verrechne_projekt(rows, eigene_ids):
 
 def verrechnen(stat):
     felder = ("id,projekt_id,status,betrag_status,betrag_netto,betrag_hinweis,rechnungsart,lieferant,ustids,belegnr,"
-              "referenzen,gesamt_netto,zahl_netto,datei_hash,absender")
+              "referenzen,gesamt_netto,zahl_netto,datei_hash,absender,dateiname,mail_datum")
     rows = sb_select_all("eingangsrechnungen", felder, "&status=in.(neu,abgeloest,doppelt,kein_beleg)&order=id")
     eigene_ids = eigene_steuer_ids(rows)
     projekte = {}
@@ -749,7 +770,7 @@ def betraege_auslesen(stat, maximal=1500):
         body = {"betrag_netto": erg["netto"], "betrag_mwst": erg["mwst"], "betrag_brutto": erg["brutto"],
                 "betrag_status": erg["status"], "betrag_hinweis": erg["hinweis"], "betrag_ausgelesen_am": jetzt(),
                 "gesamt_netto": erg["gesamt"], "zahl_netto": erg["zahl"], **merkmale}
-        if erg["nr"]:
+        if erg["nr"] and re.search(r"\d", erg["nr"]):   # nicht „Kundennr“ o. ä. aus einer Spaltenüberschrift
             body["rechnungsnummer"] = erg["nr"][:100]
         sb_request("PATCH", f"/rest/v1/eingangsrechnungen?id=eq.{int(r['id'])}", body=body)
         stat["betrag_" + erg["status"]] = stat.get("betrag_" + erg["status"], 0) + 1
@@ -1081,6 +1102,16 @@ def selbsttest():
     e = ergebnis([mk(16, "rechnung", 99.0, belegnr="1234567"), mk(17, "rechnung", 99.0, belegnr="1234567"),
                   mk(18, "rechnung", 99.0, belegnr="7654321")])
     assert e[17]["status"] == "doppelt" and e[18]["status"] == "neu" and kosten(e) == 198.0, e
+    # H) PDF ohne Nummer, gleiche Rechnungsnummer im Dateinamen (korrigierte Fassung) → nur die neuere zählt;
+    #    andere Nummer oder anderer Lieferant → bleibt eigenständig
+    e = ergebnis([mk(19, "rechnung", 900.0, ustids="12/345/67890", dateiname="Muster Bau_RE0020.pdf", mail_datum="2025-12-27"),
+                  mk(20, "rechnung", 900.0, ustids="12/345/67890", dateiname="Muster Bau_RE0020-1.pdf", mail_datum="2026-01-11"),
+                  mk(21, "rechnung", 900.0, ustids="12/345/67890", dateiname="Muster Bau_RE0021.pdf", mail_datum="2026-01-12"),
+                  mk(22, "rechnung", 900.0, ustids="98/765/43210", dateiname="Andere_RE0020.pdf", mail_datum="2026-01-13")])
+    assert e[19]["status"] == "doppelt" and e[20]["status"] == e[21]["status"] == e[22]["status"] == "neu", e
+    assert kosten(e) == 2700.0, e
+    assert dateiname_nr("Muster Bau_RE0020-1.pdf") == dateiname_nr("Muster Bau_RE0020 (2).pdf") == "0020"
+    assert dateiname_nr("Rechnung 2025-10-03.pdf") is None and dateiname_nr("Rechnung.pdf") is None
     # Andys eigene Steuernummer steht auf vielen Belegen → wird nicht als Lieferant genommen
     viele = [{"ustids": f"DE{i:09d} DE999999999"} for i in range(1, 13)]
     assert eigene_steuer_ids(viele) == {"DE999999999"}

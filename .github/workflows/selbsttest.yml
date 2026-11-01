@@ -1,0 +1,19 @@
+# Selbsttests bei jedem Hochladen (auch auf Arbeitszweigen) – ohne Zugangsdaten, ohne Datenbank
+name: Selbsttest
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rechnungs-Sync (Eingangsrechnungen)
+        run: python3 scripts/sync_rechnungen.py --selbsttest
+      - name: Eigene Belege (Ausgangsrechnungen, Auftragsbestätigungen)
+        run: python3 scripts/ausgangsbelege.py --selbsttest

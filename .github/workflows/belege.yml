@@ -1,0 +1,73 @@
+# Teil E – Eigene Belege: liest Andys hochgeladene Ausgangsrechnungen/Auftragsbestätigungen aus, verrechnet sie
+# und legt für zugeordnete Projekte die Kundenrechnungen an (scripts/ausgangsbelege.py).
+# Hochgeladen werden die PDFs von Andys PC (scripts/belege_hochladen.ps1), der den Ablauf danach auch direkt anstößt.
+# Achtung: Das Repository ist öffentlich, die Protokolle auch → das Skript gibt nur Zahlen aus.
+name: Eigene Belege
+
+on:
+  schedule:
+    - cron: "20 5-19 * * *"   # stündlich tagsüber (UTC), damit Zuordnungen/Bestätigungen aus der App bald ankommen
+  workflow_dispatch:
+    inputs:
+      bezahlt_bis:
+        description: "Abweichender Stichtag (JJJJ-MM-TT): Rechnungen bis dahin als bezahlt anlegen – leer = 2026-09-30 (Andys Vorgabe)"
+        type: string
+        default: ""
+      probe:
+        description: "Probe: alles auslesen und verrechnen, aber keine Kundenrechnungen anlegen"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write           # nur für die Wachhalte-Schaltung unten
+
+concurrency:
+  group: eigene-belege
+  cancel-in-progress: false
+
+jobs:
+  belege:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: https://bthbicznechsnnowkxjz.supabase.co
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Selbsttest (ohne Zugangsdaten)
+        env:
+          SUPABASE_SERVICE_KEY: ""
+        run: python3 scripts/ausgangsbelege.py --selbsttest
+
+      - name: PDF-Leser installieren
+        run: python3 -m pip install --quiet "pdfplumber==0.11.4"
+
+      - name: Neue Belege zählen
+        id: zahl
+        run: python3 scripts/ausgangsbelege.py --anstehend >> "$GITHUB_OUTPUT"
+
+      - name: Texterkennung installieren (nur wenn neue Belege da sind)
+        if: steps.zahl.outputs.anstehend != '0'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-deu poppler-utils > /dev/null
+
+      - name: Belege auslesen und verrechnen
+        env:
+          BEZAHLT_BIS: ${{ inputs.bezahlt_bis }}
+          PROBE: ${{ inputs.probe }}
+        run: |
+          ARGS=""
+          if [ -n "$BEZAHLT_BIS" ]; then ARGS="$ARGS --bezahlt-bis $BEZAHLT_BIS"; fi
+          if [ "$PROBE" = "true" ]; then ARGS="$ARGS --probe"; fi
+          python3 scripts/ausgangsbelege.py $ARGS
+
+      # GitHub schaltet zeitgesteuerte Abläufe in öffentlichen Repositories nach 60 Tagen
+      # ohne Änderung am Repository ab. Das erneute Einschalten bei jedem Lauf verhindert das.
+      - name: Wachhalten
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/belege.yml/enable" || true
