@@ -34,14 +34,23 @@ $ab = New-Object Windows.Forms.Button; $ab.Text = 'Abbrechen'; $ab.Location = Ne
 $ab.DialogResult = 'Cancel'
 $f.Controls.AddRange(@($l, $t, $ok, $ab)); $f.AcceptButton = $ok; $f.CancelButton = $ab
 if ($f.ShowDialog() -ne 'OK' -or -not $t.Text.Trim()) { Write-Output 'Abgebrochen – nichts geändert.'; exit 1 }
-$key = $t.Text.Trim(); $t.Text = ''
+# Leerzeichen, Zeilenumbrüche, unsichtbare Zeichen und Anführungszeichen vom Kopieren entfernen
+$key = $t.Text -replace '[\s\p{Cf}"'']', ''; $t.Text = ''
+if ($key -notmatch '^sb_secret_[A-Za-z0-9_-]+$') {
+  Meldung 'Das ist kein vollständiger Geheimschlüssel. Er muss mit sb_secret_ beginnen und darf keine Punkte (verdeckte Stellen) enthalten. Bitte in Supabase beim Schlüssel belege-pc auf das Kopieren-Symbol klicken und erneut einfügen.' 'Schlüssel unvollständig' 'Warning'
+  Write-Output 'Schlüssel unvollständig – nichts gespeichert.'; exit 1
+}
 
 # ── 2. Prüfen und verschlüsselt speichern ──
+# Eigene Kennung statt PowerShell-Standard (Mozilla/5.0 …), sonst hält Supabase die Anfrage für einen Browser und lehnt ab
+$UA = 'PapistBau-Belege/1.0'
 try {
   Invoke-WebRequest -Uri "$SbUrl/rest/v1/ausgangsbelege?select=id&limit=1" -Headers @{ apikey = $key; Authorization = "Bearer $key" } `
-    -UseBasicParsing -TimeoutSec 30 | Out-Null
+    -UserAgent $UA -UseBasicParsing -TimeoutSec 30 | Out-Null
 } catch {
-  Meldung 'Der Schlüssel wird von Supabase nicht angenommen. Bitte prüfen, ob der ganze Schlüssel kopiert wurde (beginnt mit sb_secret_).' 'Schlüssel abgelehnt' 'Warning'
+  $grund = $_.ErrorDetails.Message
+  if (-not $grund) { $grund = $_.Exception.Message }
+  Meldung "Der Schlüssel wird von Supabase nicht angenommen.`n`nAntwort von Supabase: $grund" 'Schlüssel abgelehnt' 'Warning'
   Write-Output 'Schlüssel abgelehnt – nichts gespeichert.'; exit 1
 }
 if (-not (Test-Path $Ablage)) { New-Item -ItemType Directory -Path $Ablage | Out-Null }

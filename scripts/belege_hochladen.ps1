@@ -17,6 +17,8 @@ param([switch]$Probe, [string]$Basis = (Join-Path $env:USERPROFILE 'OneDrive\PB'
 
 $ErrorActionPreference = 'Stop'
 $SbUrl     = 'https://bthbicznechsnnowkxjz.supabase.co'
+# Supabase lehnt Geheimschlüssel ab, wenn die Anfrage wie ein Browser aussieht – PowerShell 5.1 meldet sich sonst als „Mozilla/5.0 …“
+$UA        = 'PapistBau-Belege/1.0'
 $Bucket    = 'ausgangsbelege'
 $Ablage    = Join-Path $env:LOCALAPPDATA 'PapistBau'
 $Schluessel = Join-Path $Ablage 'belege-schluessel.txt'
@@ -66,7 +68,7 @@ function Lies-Schluessel {
 function Sb([string]$methode, [string]$pfad, $body = $null, [hashtable]$extra = @{}) {
   $h = @{ apikey = $script:Key; Authorization = "Bearer $script:Key" }
   foreach ($k in $extra.Keys) { $h[$k] = $extra[$k] }
-  $arg = @{ Method = $methode; Uri = "$SbUrl$pfad"; Headers = $h; UseBasicParsing = $true; TimeoutSec = 120 }
+  $arg = @{ Method = $methode; Uri = "$SbUrl$pfad"; Headers = $h; UserAgent = $UA; UseBasicParsing = $true; TimeoutSec = 120 }
   if ($null -ne $body) {
     # Windows PowerShell 5.1 schickt Texte sonst nicht als UTF-8 (Umlaute in Ordnernamen)
     $arg.Body = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 5 -Compress))
@@ -120,7 +122,7 @@ try {
       }
       $pfad = "$($b.Quelle)/$hash.pdf"
       Invoke-WebRequest -Method Post -Uri "$SbUrl/storage/v1/object/$Bucket/$pfad" -InFile $b.Datei.FullName -ContentType 'application/pdf' `
-        -Headers @{ apikey = $script:Key; Authorization = "Bearer $script:Key"; 'x-upsert' = 'true' } -UseBasicParsing -TimeoutSec 300 | Out-Null
+        -Headers @{ apikey = $script:Key; Authorization = "Bearer $script:Key"; 'x-upsert' = 'true' } -UserAgent $UA -UseBasicParsing -TimeoutSec 300 | Out-Null
       Sb 'POST' '/rest/v1/ausgangsbelege' @{
         quelle = $b.Quelle; ordner = $b.Ordner; dateiname = $b.Datei.Name; datei_hash = $hash
         groesse_bytes = $b.Datei.Length; datei_geaendert_am = $b.Datei.LastWriteTimeUtc.ToString('o'); storage_pfad = $pfad
