@@ -16,7 +16,8 @@
 param([switch]$Probe, [string]$Basis = (Join-Path $env:USERPROFILE 'OneDrive\PB'))
 
 $ErrorActionPreference = 'Stop'
-$SbUrl     = 'https://bthbicznechsnnowkxjz.supabase.co'
+$ProgressPreference = 'SilentlyContinue'   # kein Fortschrittsbalken: blockiert im verdeckten Fenster (conhost --headless)
+$SbUrl    = 'https://bthbicznechsnnowkxjz.supabase.co'
 # Supabase lehnt Geheimschlüssel ab, wenn die Anfrage wie ein Browser aussieht – PowerShell 5.1 meldet sich sonst als „Mozilla/5.0 …“
 $UA        = 'PapistBau-Belege/1.0'
 $Bucket    = 'ausgangsbelege'
@@ -121,7 +122,9 @@ try {
         continue
       }
       $pfad = "$($b.Quelle)/$hash.pdf"
-      Invoke-WebRequest -Method Post -Uri "$SbUrl/storage/v1/object/$Bucket/$pfad" -InFile $b.Datei.FullName -ContentType 'application/pdf' `
+      # Datei selbst nur lesend öffnen: -InFile öffnet in PowerShell 5.1 mit Schreibrecht → bei OneDrive „Zugriff verweigert“
+      $inhalt = [IO.File]::ReadAllBytes($b.Datei.FullName)
+      Invoke-WebRequest -Method Post -Uri "$SbUrl/storage/v1/object/$Bucket/$pfad" -Body $inhalt -ContentType 'application/pdf' `
         -Headers @{ apikey = $script:Key; Authorization = "Bearer $script:Key"; 'x-upsert' = 'true' } -UserAgent $UA -UseBasicParsing -TimeoutSec 300 | Out-Null
       Sb 'POST' '/rest/v1/ausgangsbelege' @{
         quelle = $b.Quelle; ordner = $b.Ordner; dateiname = $b.Datei.Name; datei_hash = $hash
