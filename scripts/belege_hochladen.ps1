@@ -60,7 +60,7 @@ function Belege-Finden {
 # ── Supabase ──
 function Lies-Schluessel {
   if (-not (Test-Path $Schluessel)) { throw 'Kein Schlüssel hinterlegt – bitte belege_einrichten.ps1 ausführen.' }
-  $sicher = Get-Content -LiteralPath $Schluessel -Raw | ConvertTo-SecureString
+  $sicher = (Get-Content -LiteralPath $Schluessel -Raw).Trim() | ConvertTo-SecureString
   $p = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sicher)
   try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($p) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($p) }
 }

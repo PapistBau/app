@@ -5,6 +5,9 @@
    3. Geplante Aufgabe „Papist Bau – Belege hochladen“: bei der Anmeldung und täglich 12:30 + 18:30 Uhr
    4. Ersten Lauf starten
   Aufruf: powershell -NoProfile -ExecutionPolicy Bypass -STA -File belege_einrichten.ps1
+  Nicht direkt aus der Claude-App starten: deren Unterprozesse schreiben AppData in einen eigenen Bereich
+  (…\Packages\Claude_…\LocalCache), den die geplante Aufgabe nicht sieht. Stattdessen per Doppelklick/Explorer
+  oder über eine einmalige geplante Aufgabe starten.
 #>
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -54,7 +57,7 @@ try {
   Write-Output 'Schlüssel abgelehnt – nichts gespeichert.'; exit 1
 }
 if (-not (Test-Path $Ablage)) { New-Item -ItemType Directory -Path $Ablage | Out-Null }
-ConvertTo-SecureString $key -AsPlainText -Force | ConvertFrom-SecureString | Set-Content -LiteralPath $Datei -Encoding ASCII
+ConvertTo-SecureString $key -AsPlainText -Force | ConvertFrom-SecureString | Set-Content -LiteralPath $Datei -Encoding ASCII -NoNewline
 $key = $null
 Write-Output 'Schlüssel geprüft und verschlüsselt gespeichert.'
 
