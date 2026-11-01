@@ -284,6 +284,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 .rs-offen{background:var(--adim);color:var(--accent);border:1px solid rgba(240,165,0,.3);}
 .rs-teilbezahlt{background:var(--odim);color:var(--orange);border:1px solid rgba(255,166,87,.3);}
 .rs-mahnung{background:var(--rdim);color:var(--red);border:1px solid rgba(248,81,73,.3);}
+.rs-storniert{background:var(--card2);color:var(--t2);border:1px solid var(--border);}
 
 /* ── RECHNUNGEN PRO PROJEKT ── */
 .rp-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);margin-bottom:14px;overflow:hidden;}
@@ -376,6 +377,23 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 .cp-hinweis{font-size:12px;color:var(--t2);}
 .cp-betrag{font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--red);white-space:nowrap;}
 .cp-leer{padding:4px 18px 12px;font-size:13px;color:var(--t2);}
+/* Projektkarten im Controlling: Suche, Filter, einzeln auf-/zuklappen */
+.ctrl-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+.ctrl-toolbar .fi{flex:1 1 200px;min-width:0;}
+.ctrl-proj-header{cursor:pointer;user-select:none;}
+.ctrl-proj-card.zu .ctrl-proj-body{display:none;}
+.ctrl-proj-card.zu .ctrl-proj-header{border-bottom:none;}
+.cp-pfeil{color:var(--t2);font-size:14px;transition:transform .15s;flex-shrink:0;}
+.ctrl-proj-card:not(.zu) .cp-pfeil{transform:rotate(90deg);}
+.cp-kurz{display:flex;gap:6px 14px;flex-wrap:wrap;font-size:12px;color:var(--t2);margin-top:4px;}
+.cp-kurz b{color:var(--text);font-weight:600;}
+.cp-quelle{font-size:11px;color:var(--t2);margin-top:2px;line-height:1.3;}
+/* Reiter „Eigene Belege“: Karten statt Tabelle (passt aufs Handy) */
+.ab-zeile{padding:12px 0;border-top:1px solid var(--border);}
+.ab-kopf{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.ab-sub{font-size:12px;color:var(--t2);margin-top:2px;}
+.ab-aktion{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;}
+.ab-aktion .fs{flex:1 1 220px;min-width:0;padding:6px 8px;}
 .ctrl-proj-name{font-weight:700;font-size:15px;flex:1;min-width:0;}
 .ctrl-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;padding:16px 18px;}
 .ctrl-kpi{text-align:center;background:var(--card2);border-radius:var(--r2);padding:12px 8px;}
@@ -1093,6 +1111,45 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 </div>
 </div>
 
+<!-- Eigener Beleg (Ausgangsrechnung / Auftragsbestätigung): Betrag prüfen / korrigieren -->
+<div class="overlay" id="modal-ab-betrag" style="display:none" onclick="if(event.target===this)closeModal('modal-ab-betrag')">
+<div class="modal">
+  <div class="mttl">Beleg prüfen</div>
+  <input type="hidden" id="abb-id">
+  <div style="font-size:13px;color:var(--t2);margin-bottom:6px" id="abb-info"></div>
+  <div style="font-size:12px;color:var(--orange);margin-bottom:12px" id="abb-hinweis"></div>
+  <div class="frow">
+    <div class="fg"><label class="fl" id="abb-netto-lbl">Netto (€) *</label><input type="number" class="fi" id="abb-netto" step="0.01"></div>
+    <div class="fg"><label class="fl">Brutto (€) *</label><input type="number" class="fi" id="abb-brutto" step="0.01"></div>
+  </div>
+  <div class="frow" id="abb-rest-row">
+    <div class="fg"><label class="fl">Noch zu zahlen netto (€)</label><input type="number" class="fi" id="abb-rest-netto" step="0.01"></div>
+    <div class="fg"><label class="fl">Noch zu zahlen brutto (€)</label><input type="number" class="fi" id="abb-rest-brutto" step="0.01"></div>
+  </div>
+  <div class="fg" id="abb-bezug-row"><label class="fl">Storniert Rechnung Nr.</label><input class="fi" id="abb-bezug" placeholder="z.B. 4999-26"></div>
+  <div class="mfooter">
+    <button class="btn btn-blue" onclick="openBelegPdf(document.getElementById('abb-id').value)">📄 PDF ansehen</button>
+    <button class="btn btn-ghost" onclick="closeModal('modal-ab-betrag')">Abbrechen</button>
+    <button class="btn btn-primary" onclick="saveAusgangModal()">✔ Speichern</button>
+  </div>
+</div>
+</div>
+
+<!-- Auftragssumme eines Projekts von Hand festlegen (hat Vorrang vor Schlussrechnung / Auftragsbestätigung) -->
+<div class="overlay" id="modal-auftrag" style="display:none" onclick="if(event.target===this)closeModal('modal-auftrag')">
+<div class="modal">
+  <div class="mttl">Auftragssumme</div>
+  <input type="hidden" id="auf-proj">
+  <div style="font-size:13px;color:var(--t2);margin-bottom:12px;line-height:1.6" id="auf-info"></div>
+  <div class="fg"><label class="fl">Von Hand festlegen – Netto (€)</label><input type="number" class="fi" id="auf-wert" step="0.01" placeholder="leer = automatisch"></div>
+  <div class="mfooter">
+    <button class="btn btn-ghost" onclick="saveAuftragModal(true)">Festlegung entfernen</button>
+    <button class="btn btn-ghost" onclick="closeModal('modal-auftrag')">Abbrechen</button>
+    <button class="btn btn-primary" onclick="saveAuftragModal(false)">✔ Speichern</button>
+  </div>
+</div>
+</div>
+
 <div class="overlay" id="modal-material" style="display:none" onclick="if(event.target===this)closeModal('modal-material')">
 <div class="modal">
   <div class="mttl" id="mat-mttl">Material erfassen</div>
@@ -1147,11 +1204,25 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-projekte')">🏗 Je Projekt</div>
     <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-rechnungen')">🧾 Kundenrechnungen</div>
     <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-ordner')">📥 Rechnungsordner</div>
+    <div class="tab" onclick="switchCtrlTab(this,'ctrl-tab-belege')">📤 Eigene Belege</div>
   </div>
   <div class="tabcontent active" id="ctrl-tab-jahr">
     <div id="ctrl-jahr-content"></div>
   </div>
   <div class="tabcontent" id="ctrl-tab-projekte">
+    <div class="ctrl-toolbar">
+      <input class="fi" id="ctrl-suche" type="search" placeholder="🔍 Projekt, Kunde oder Ort suchen …" oninput="filterCtrlProj()" autocomplete="off">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="fpill active" data-f="alle" onclick="setCtrlFilter('alle')">Alle</button>
+        <button class="fpill" data-f="laufend" onclick="setCtrlFilter('laufend')">🔵 Laufend</button>
+        <button class="fpill" data-f="abgeschlossen" onclick="setCtrlFilter('abgeschlossen')">✅ Abgeschlossen</button>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="ctrlAlle(true)">▾ Alle auf</button>
+        <button class="btn btn-ghost btn-sm" onclick="ctrlAlle(false)">▸ Alle zu</button>
+      </div>
+    </div>
+    <div id="ctrl-proj-leer" class="cp-leer" style="display:none;padding:12px 0">Kein Projekt passt zur Suche.</div>
     <div id="ctrl-proj-content"></div>
   </div>
   <div class="tabcontent" id="ctrl-tab-rechnungen">
@@ -1159,6 +1230,9 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   </div>
   <div class="tabcontent" id="ctrl-tab-ordner">
     <div id="ctrl-ordner-content"></div>
+  </div>
+  <div class="tabcontent" id="ctrl-tab-belege">
+    <div id="ctrl-belege-content"></div>
   </div>
 </div>
 
@@ -1517,6 +1591,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
       <option value="bezahlt">✅ Bezahlt</option>
       <option value="teilbezahlt">🔶 Teilweise bezahlt</option>
       <option value="mahnung">🔴 Mahnung</option>
+      <option value="storniert">✖ Storniert</option>
     </select>
   </div>
   <div class="fg" id="r-bezam-wrap" style="display:none"><label class="fl">Bezahlt am</label><input type="date" class="fi" id="r-bezam"></div>
@@ -1751,7 +1826,10 @@ const RS={
   offen:      {lbl:'⏳ Offen',       cls:'rs-offen',     ico:'', ck:'offen'},
   teilbezahlt:{lbl:'🔶 Teilbezahlt', cls:'rs-teilbezahlt',ico:'◑',ck:'teilbezahlt'},
   mahnung:    {lbl:'🔴 Mahnung',     cls:'rs-mahnung',   ico:'!',ck:'mahnung'},
+  storniert:  {lbl:'✖ Storniert',    cls:'rs-storniert', ico:'✖',ck:'storniert'},
 };
+// Stornierte Rechnungen bleiben sichtbar, zählen aber in keiner Summe
+const rechZaehlt = r => r.status!=='storniert';
 
 // Keine Demo-Daten mehr — Supabase ist die einzige Quelle
 
@@ -1829,7 +1907,7 @@ function updateBadges(){
   set('laufend',projects.filter(p=>p.typ==='laufend').length);
   set('angebot',projects.filter(p=>p.typ==='angebot'||p.typ==='angebot-offen').length);
   set('anfrage',projects.filter(p=>p.typ==='anfrage').length);
-  const offRech=rechnungen.filter(r=>r.status!=='bezahlt').length;
+  const offRech=rechnungen.filter(r=>r.status!=='bezahlt'&&rechZaehlt(r)).length;
   set('rech',offRech);
 }
 
@@ -1846,7 +1924,7 @@ function renderDashboard(){
   const anf=projects.filter(p=>p.typ==='anfrage' && aktiv(p));
   const h=zeiten.reduce((a,z)=>a+z.std,0);
   const rechBez=rechnungen.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
-  const rechOff=rechnungen.filter(r=>r.status!=='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
+  const rechOff=rechnungen.filter(r=>r.status!=='bezahlt'&&rechZaehlt(r)).reduce((a,r)=>a+(r.netto||r.betrag),0);
   const aktiveMA=workers.filter(w=>!w.archiviert);
 
   document.getElementById('dash-stats').innerHTML=`
@@ -1939,7 +2017,7 @@ function renderProjCard(p){
         ${p.kunde?`<span>👤 ${p.kunde}</span>`:''}
         ${p.ort?`<span>📍 ${p.ort}</span>`:''}
         ${p.ende?`<span>📅 ${fmt(p.ende)}</span>`:''}
-        ${(p.wertNetto||p.wert)?`<span>💶 ${num(p.wertNetto||p.wert)} € Netto</span>`:''}
+        ${auftragsInfo(p).netto?`<span>💶 ${num(auftragsInfo(p).netto)} € Netto</span>`:''}
         ${pTodos?`<span style="color:var(--accent)">📋 ${pTodos} offen</span>`:''}
         ${pFotos?`<span style="color:var(--blue)">📸 ${pFotos}</span>`:''}
       </div>
@@ -2101,9 +2179,9 @@ function renderControlling(){
   ]);
   const yRech = rechnungen.filter(r=>yRechSet.has(r.id));
   // Für Jahres-KPIs nur die mit Datum im Jahr
-  const yRechJahr = rechnungen.filter(r=>r.datum.startsWith(year));
+  const yRechJahr = rechnungen.filter(r=>r.datum.startsWith(year)&&rechZaehlt(r));
 
-  const auftragsvolumen = aktivProjekte.reduce((a,p)=>a+(p.wertNetto||p.wert||0),0);
+  const auftragsvolumen = aktivProjekte.reduce((a,p)=>a+(auftragsInfo(p).netto||0),0);
   const rechGesamt = yRechJahr.reduce((a,r)=>a+(r.netto||r.betrag),0);
   const rechBez    = yRechJahr.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
   const rechOff    = rechGesamt - rechBez;
@@ -2208,8 +2286,9 @@ function renderControlling(){
     const pRech=rechnungen.filter(r=>r.projId===p.id);
     const pZeit=zeiten.filter(z=>z.projId===p.id);
     const pMat=material.filter(m=>String(m.projId)===String(p.id));
-    const rechSum=pRech.reduce((a,r)=>a+(r.netto||r.betrag),0);
-    const rechBezP=pRech.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
+    const pRechZ=pRech.filter(rechZaehlt);
+    const rechSum=pRechZ.reduce((a,r)=>a+(r.netto||r.betrag),0);
+    const rechBezP=pRechZ.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
     const rechOffP=rechSum-rechBezP;
     const stundP=pZeit.reduce((a,z)=>a+z.std,0);
     const lohnP=workers.reduce((a,w)=>{const h=pZeit.filter(z=>z.maId===w.id).reduce((x,z)=>x+z.std,0);return a+h*(w.lohn||0);},0);
@@ -2218,10 +2297,14 @@ function renderControlling(){
     // Nur gesicherte Beträge zählen (automatisch stimmig, von Andy bestätigt oder von Hand erfasst)
     const erNetto=pER.filter(erZaehlt).reduce((a,r)=>a+(Number(r.betrag_netto)||0),0);
     const erOhneBetrag=pER.filter(r=>!erNurInfo(r)&&!erZaehlt(r)).length;
-    const deckung=(p.wertNetto||p.wert)&&rechBezP?Math.round(rechBezP/(p.wertNetto||p.wert)*100):0;
-    const auftragsNetto=p.wertNetto||p.wert||0;
+    const auf=auftragsInfo(p);
+    const auftragsNetto=auf.netto||0;
+    const deckung=auftragsNetto&&rechBezP?Math.round(rechBezP/auftragsNetto*100):0;
     const deckungsBeitrag=auftragsNetto?(auftragsNetto-matNetto-lohnP-erNetto):null;
     const byMa={};pZeit.forEach(z=>{byMa[z.maId]=(byMa[z.maId]||0)+z.std;});
+    const pAB=ausgangsBelegeVon(p);
+    const abPruefen=pAB.filter(b=>b.status==='neu'&&b.betrag_status==='pruefen').length;
+    const nPruefen=erOhneBetrag+abPruefen;
 
     // Rechnungen upload area
     const rechRows=pRech.sort((a,b)=>b.datum.localeCompare(a.datum)).map(r=>{
@@ -2236,23 +2319,37 @@ function renderControlling(){
         <td>${r.netto?num(r.netto)+' €':'–'}</td>
         <td><span class="rs-badge ${rs.cls}">${rs.lbl}</span>${od?' ⚠':''}</td>
         <td>
-          ${r.pdfData?`<button class="btn btn-blue btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄</button>`:''}
+          ${r.pdfData||r.belegPfad?`<button class="btn btn-blue btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄</button>`:''}
           <button class="edit-btn" data-id="${rid}" onclick="editRech(this.dataset.id)">✏</button>
           <button class="del-btn" data-id="${rid}" onclick="confirmDeleteRech(this.dataset.id)">🗑</button>
         </td>
       </tr>`;}).join('');
+    const urspruenglich=auf.urspr&&auf.quelle!=='ursprung'&&auf.quelle!=='manuell'&&Math.abs(auf.urspr-auftragsNetto)>0.005;
 
-    return`<div class="ctrl-proj-card">
-      <div class="ctrl-proj-header">
-        <div class="pcard-bar" style="width:5px;height:50px;border-radius:3px;background:${sc.col};flex-shrink:0"></div>
+    return`<div class="ctrl-proj-card${ctrlAuf.has(String(p.id))?'':' zu'}" data-id="${p.id}" data-typ="${p.typ}"
+        data-such="${esc([p.name,p.kunde,p.ort].filter(Boolean).join(' ').toLowerCase())}">
+      <div class="ctrl-proj-header" onclick="ctrlToggle(this)">
+        <span class="cp-pfeil">▸</span>
+        <div class="pcard-bar" style="width:5px;height:42px;border-radius:3px;background:${sc.col};flex-shrink:0"></div>
         <div style="flex:1;min-width:0">
           <div class="ctrl-proj-name">${sc.ico} ${p.name}</div>
           ${p.kunde?`<div style="font-size:12px;color:var(--t2)">👤 ${p.kunde}${p.ort?' · 📍'+p.ort:''}</div>`:''}
+          <div class="cp-kurz">
+            <span>💶 Auftrag <b>${auftragsNetto?num(auftragsNetto)+' €':'–'}</b></span>
+            <span>📊 Deckungsbeitrag <b style="color:${deckungsBeitrag===null?'var(--t2)':deckungsBeitrag>=0?'var(--green)':'var(--red)'}">${deckungsBeitrag===null?'–':num(deckungsBeitrag)+' €'}</b></span>
+            ${rechOffP>0.005?`<span>⏳ offen <b>${num(rechOffP)} €</b></span>`:''}
+            ${nPruefen?`<span style="color:var(--orange)">⚠ ${nPruefen} zu prüfen</span>`:''}
+          </div>
         </div>
         <span class="badge ${sc.bc}">${sc.lbl}</span>
       </div>
+      <div class="ctrl-proj-body">
       <div class="ctrl-kpi-row">
-        <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--accent)">${auftragsNetto?num(auftragsNetto)+' €':'–'}</div><div class="ctrl-kpi-lbl">Auftragssumme Netto</div></div>
+        <div class="ctrl-kpi">
+          <div class="ctrl-kpi-val" style="color:var(--accent)">${auftragsNetto?num(auftragsNetto)+' €':'–'} <button class="edit-btn" onclick="openAuftragModal(${p.id})" title="Auftragssumme von Hand festlegen">✏</button></div>
+          <div class="ctrl-kpi-lbl">Auftragssumme Netto</div>
+          ${auf.text?`<div class="cp-quelle">${esc(auf.text)}${urspruenglich?` · ursprünglich ${num(auf.urspr)} €`:''}</div>`:''}
+        </div>
         ${p.prog?`<div class="ctrl-kpi"><div class="ctrl-kpi-val">${p.prog}%</div><div class="ctrl-kpi-lbl">Fortschritt</div></div>`:''}
       </div>
 
@@ -2269,7 +2366,7 @@ function renderControlling(){
           </div>
         </div>
         <div class="ctrl-kpi-row" style="padding-top:0">
-          <div class="ctrl-kpi"><div class="ctrl-kpi-val">${num(rechSum)} €</div><div class="ctrl-kpi-lbl">Gestellt (${pRech.length})</div></div>
+          <div class="ctrl-kpi"><div class="ctrl-kpi-val">${num(rechSum)} €</div><div class="ctrl-kpi-lbl">Gestellt (${pRechZ.length})</div></div>
           <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:var(--green)">${num(rechBezP)} €</div><div class="ctrl-kpi-lbl">Bezahlt</div></div>
           <div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:${rechOffP>0?'var(--orange)':'var(--t2)'}">${num(rechOffP)} €</div><div class="ctrl-kpi-lbl">Offen</div></div>
           ${deckung?`<div class="ctrl-kpi"><div class="ctrl-kpi-val" style="color:${deckung>=100?'var(--green)':'var(--accent)'}">${deckung}%</div><div class="ctrl-kpi-lbl">vom Auftrag bezahlt</div></div>`:''}
@@ -2281,6 +2378,7 @@ function renderControlling(){
             <tbody>${rechRows}</tbody>
           </table>
         </div>`:`<div class="cp-leer">Noch keine Kundenrechnung für dieses Projekt</div>`}
+        ${renderAusgangsBelegListe(pAB)}
       </div>
 
       <!-- 🧱 KOSTEN: Lohn, Material, Eingangsrechnungen -->
@@ -2328,8 +2426,10 @@ function renderControlling(){
         </div>
         ${erOhneBetrag?`<div class="cp-leer" style="padding-top:0">⚠ ${erOhneBetrag} Eingangsrechnung${erOhneBetrag!==1?'en':''} noch nicht geprüft – zählen erst nach Bestätigung, Ergebnis noch nicht vollständig</div>`:''}
       </div>
+      </div>
     </div>`;
   }).join('') : '<div class="empty"><div class="empty-ico">🏗</div><div class="empty-ttl">Keine aktiven Projekte in diesem Jahr</div></div>';
+  filterCtrlProj();
 
   // ── TAB 3: RECHNUNGEN ──
   const rechSorted=[...yRech].sort((a,b)=>b.datum.localeCompare(a.datum));
@@ -2355,7 +2455,7 @@ function renderControlling(){
               <td style="${od?'color:var(--red)':''}">${r.faellig?fmt(r.faellig):'–'}</td>
               <td><span class="rs-badge ${rs.cls}">${rs.lbl}</span></td>
               <td style="white-space:nowrap">
-                ${r.pdfData?`<button class="btn btn-blue btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄</button>`:''}
+                ${r.pdfData||r.belegPfad?`<button class="btn btn-blue btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄</button>`:''}
                 <button class="edit-btn" data-id="${rid}" onclick="editRech(this.dataset.id)">✏</button>
                 <button class="del-btn" data-id="${rid}" onclick="confirmDeleteRech(this.dataset.id)">🗑</button>
               </td>
@@ -2365,7 +2465,7 @@ function renderControlling(){
         <tfoot>
           <tr style="background:var(--card2)">
             <td colspan="6" style="font-weight:700;text-align:right;padding:10px 14px">Gesamt:</td>
-            <td style="font-family:'Bebas Neue';font-size:20px;color:var(--accent);padding:10px 14px">${num(yRech.reduce((a,r)=>a+r.betrag,0))} €</td>
+            <td style="font-family:'Bebas Neue';font-size:20px;color:var(--accent);padding:10px 14px">${num(yRech.filter(rechZaehlt).reduce((a,r)=>a+r.betrag,0))} €</td>
             <td colspan="3"></td>
           </tr>
         </tfoot>
@@ -2374,6 +2474,103 @@ function renderControlling(){
 
   // ── TAB 4: RECHNUNGSORDNER ──
   renderRechOrdner();
+  // ── TAB 5: EIGENE BELEGE ──
+  renderAusgangsbelege();
+}
+
+// ── Je Projekt: suchen, nach laufend/abgeschlossen filtern, Karten einzeln auf-/zuklappen ──
+const ctrlAuf = new Set();   // aufgeklappte Projektkarten (sonst alle zu)
+let ctrlFilter = 'alle';
+
+function ctrlToggle(kopf){
+  const karte=kopf.closest('.ctrl-proj-card');
+  const id=karte.dataset.id;
+  if(karte.classList.toggle('zu')) ctrlAuf.delete(id); else ctrlAuf.add(id);
+}
+
+function ctrlAlle(auf){
+  document.querySelectorAll('#ctrl-proj-content .ctrl-proj-card').forEach(k=>{
+    if(k.style.display==='none') return;
+    k.classList.toggle('zu', !auf);
+    if(auf) ctrlAuf.add(k.dataset.id); else ctrlAuf.delete(k.dataset.id);
+  });
+}
+
+function setCtrlFilter(f){
+  ctrlFilter=f;
+  document.querySelectorAll('#ctrl-tab-projekte .fpill').forEach(b=>b.classList.toggle('active', b.dataset.f===f));
+  filterCtrlProj();
+}
+
+function filterCtrlProj(){
+  const q=(document.getElementById('ctrl-suche')?.value||'').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let sichtbar=0;
+  const karten=document.querySelectorAll('#ctrl-proj-content .ctrl-proj-card');
+  karten.forEach(k=>{
+    const ok=(ctrlFilter==='alle'||k.dataset.typ===ctrlFilter) && q.every(w=>k.dataset.such.includes(w));
+    k.style.display=ok?'':'none';
+    if(ok) sichtbar++;
+  });
+  const leer=document.getElementById('ctrl-proj-leer');
+  if(leer) leer.style.display=(karten.length&&!sichtbar)?'':'none';
+}
+
+// ── Auftragssumme: von Hand festgelegt > Schlussrechnung/Rechnungen > Auftragsbestätigung > ursprünglich eingetragen ──
+// (Regel mit Andy abgestimmt 31.10.2026; Abschläge zählen nie, sie werden von der Schlussrechnung abgelöst)
+function ausgangsBelegeVon(p){
+  const gruppen=new Set(ausgangsGruppen.filter(g=>g.quelle==='manuell'&&g.projekt_id!=null&&String(g.projekt_id)===String(p.id)).map(g=>g.gruppe));
+  if(!gruppen.size) return [];
+  return ausgangsBelege.filter(b=>gruppen.has(b.gruppe)&&b.status!=='ersetzt');
+}
+
+function auftragsInfo(p){
+  const urspr=Number(p.wertNetto||p.wert||0)||null;
+  if(p.wertManuell!=null&&p.wertManuell!=='') return {netto:Number(p.wertManuell), quelle:'manuell', text:'von Hand festgelegt', urspr};
+  const belege=ausgangsBelegeVon(p).filter(b=>b.status==='neu');
+  const gut=b=>['sicher','bestaetigt'].includes(b.betrag_status)&&b.netto!=null;
+  const rech=belege.filter(b=>b.quelle==='rechnung'&&!b.storniert_durch);
+  const sr=rech.filter(b=>b.belegart==='schluss'), einzel=rech.filter(b=>b.belegart==='rechnung');
+  const azOffen=rech.filter(b=>b.belegart==='abschlag'&&!b.verrechnet_in);
+  const unsicher=[...sr,...einzel,...azOffen].some(b=>!gut(b));
+  if((sr.length||einzel.length)&&!azOffen.length&&!unsicher){
+    const netto=Math.round([...sr,...einzel].reduce((a,b)=>a+Number(b.netto),0)*100)/100;
+    const text=sr.length
+      ? `aus Schlussrechnung ${sr.map(b=>b.nummer).join(', ')}${einzel.length?` + ${einzel.length} Rechnung${einzel.length>1?'en':''}`:''}`
+      : (einzel.length===1?`aus Rechnung ${einzel[0].nummer}`:`Summe aus ${einzel.length} Rechnungen`);
+    return {netto, quelle:sr.length?'schluss':'rechnungen', text, urspr};
+  }
+  const grund=belege.length?(unsicher?'Rechnungsbeträge noch prüfen':(azOffen.length?'Schlussrechnung steht noch aus':'')):'';
+  const ab=belege.filter(b=>b.quelle==='auftrag'&&gut(b));
+  if(ab.length){
+    const netto=Math.round(ab.reduce((a,b)=>a+Number(b.netto),0)*100)/100;
+    return {netto, quelle:'ab', text:`aus Auftragsbestätigung ${ab.map(b=>b.nummer).join(', ')}${grund?' · '+grund:''}`, urspr};
+  }
+  return {netto:urspr, quelle:urspr?'ursprung':null, text:urspr?('eingetragen'+(grund?' · '+grund:'')):(grund||''), urspr};
+}
+
+function openAuftragModal(projId){
+  const p=projects.find(x=>String(x.id)===String(projId)); if(!p) return;
+  const manuell=p.wertManuell;
+  const ohne=auftragsInfo({...p, wertManuell:null});
+  document.getElementById('auf-proj').value=p.id;
+  document.getElementById('auf-info').innerHTML=`<b>${esc(p.name)}</b><br>`
+    +`Automatisch: ${ohne.netto?num(ohne.netto)+' €':'–'}${ohne.text?' ('+esc(ohne.text)+')':''}<br>`
+    +`Ursprünglich eingetragen: ${ohne.urspr?num(ohne.urspr)+' €':'–'}<br>`
+    +`Eine Festlegung von Hand hat Vorrang vor allem anderen.`;
+  document.getElementById('auf-wert').value=manuell!=null&&manuell!==''?manuell:'';
+  document.getElementById('modal-auftrag').style.display='flex';
+}
+
+function saveAuftragModal(entfernen){
+  const p=projects.find(x=>String(x.id)===document.getElementById('auf-proj').value); if(!p) return;
+  const roh=document.getElementById('auf-wert').value;
+  if(!entfernen&&roh===''){ toast('Bitte einen Betrag eintragen oder „Festlegung entfernen“','var(--orange)'); return; }
+  if(entfernen) delete p.wertManuell; else p.wertManuell=Math.round(parseFloat(roh)*100)/100;
+  p._syncSession=SYNC_SESSION;
+  saveAll();
+  closeModal('modal-auftrag');
+  renderControlling();
+  toast(entfernen?'Auftragssumme wieder automatisch':'💾 Auftragssumme festgelegt');
 }
 
 // ════════════════════════════════════
@@ -2692,6 +2889,237 @@ async function saveRechOrdner(i, aktion){
   }
 }
 
+// ════════════════════════════════════
+// EIGENE BELEGE (Teil E): Andys Ausgangsrechnungen + Auftragsbestätigungen aus OneDrive
+// ════════════════════════════════════
+// Hochgeladen von Andys PC (scripts/belege_hochladen.ps1), ausgelesen und verrechnet im GitHub-Ablauf
+// (scripts/ausgangsbelege.py, stündlich). Nur Admin: Tabellen ausgangsbelege + ausgangs_gruppen, PDFs im
+// privaten Speicher "ausgangsbelege". Kundenrechnungen daraus legt der Ablauf in „rechnungen“ an (data.quelle='beleg').
+let ausgangsBelege = [], ausgangsGruppen = [];
+const AB_ART = {abschlag:'Abschlag', schluss:'Schlussrechnung', rechnung:'Rechnung', storno:'Storno', auftrag:'Auftragsbestätigung'};
+
+async function loadAusgangsbelege(){
+  try{
+    const sel='id,quelle,ordner,dateiname,storage_pfad,gruppe,belegart,nummer,bezug_nummer,datum,netto,brutto,rest_netto,rest_brutto,'
+      +'betrag_status,betrag_hinweis,text_quelle,status,storniert_durch,verrechnet_in,ausgelesen_am';
+    const rows=[];
+    for(let off=0;;off+=1000){
+      const r=await fetch(`${SB_URL}/rest/v1/ausgangsbelege?select=${sel}&status=neq.geloescht&order=nummer.desc.nullslast,id.desc&offset=${off}&limit=1000`,{headers:sbHeaders});
+      if(!r.ok) throw new Error('ausgangsbelege '+r.status);
+      const page=await r.json(); rows.push(...page);
+      if(page.length<1000) break;
+    }
+    const zahlOderNull=v=>v==null?null:Number(v);
+    ausgangsBelege=rows.map(b=>({...b, netto:zahlOderNull(b.netto), brutto:zahlOderNull(b.brutto),
+      rest_netto:zahlOderNull(b.rest_netto), rest_brutto:zahlOderNull(b.rest_brutto)}));
+    const g=await fetch(`${SB_URL}/rest/v1/ausgangs_gruppen?select=*&order=gruppe`,{headers:sbHeaders});
+    if(g.ok) ausgangsGruppen=await g.json();
+  }catch(e){ console.warn('Eigene Belege nicht geladen', e); }
+}
+
+// Ordnername ohne „Rechnung 4999-26_“ / „AuftragsNr. 3999-26_“ → „Muster · Badsanierung Musterstadt · SR“
+const abOrdnerKurz = o => String(o||'').replace(/^(Rechnung\s+\d{4}-\d{2}|AuftragsNr[._\s]*\d{4}-\d{2})[_\s-]+/i,'').replace(/_+/g,' · ');
+// … und für die Zuordnung ohne „1.AZ“, „SR“, „Storno …“, „2. Rechnung“ → „Muster · Badsanierung Musterstadt“
+const abGruppeName = o => abOrdnerKurz(String(o||'')
+  .replace(/(^|[_\s]+)(stornorechnung|storno|stornu)\b.*$/i,'').replace(/[_\s]*\d{1,2}\s*\.\s*AZ\b.*$/i,'')
+  .replace(/[_\s]+SR\b.*$/i,'').replace(/[_\s]*\d{1,2}\s*\.\s*Rechnung\b.*$/i,''));
+
+async function openBelegPdf(idOderPfad){
+  const b=ausgangsBelege.find(x=>String(x.id)===String(idOderPfad));
+  const roh=b?b.storage_pfad:idOderPfad;
+  if(!roh) return;
+  const fenster=window.open('','_blank'); // sofort öffnen, sonst blockiert der Browser das Fenster
+  try{
+    const pfad=String(roh).split('/').map(encodeURIComponent).join('/');
+    const res=await fetch(`${SB_URL}/storage/v1/object/sign/ausgangsbelege/${pfad}`,{
+      method:'POST', headers:sbHeaders, body:JSON.stringify({expiresIn:600})
+    });
+    const d=await res.json().catch(()=>({}));
+    if(!res.ok||!d.signedURL) throw new Error('sign '+res.status);
+    fenster.location=SB_URL+'/storage/v1'+d.signedURL;
+  }catch(e){
+    if(fenster) fenster.close();
+    toast('⚠ PDF konnte nicht geöffnet werden','var(--red)');
+  }
+}
+
+function abStatusBadge(b){
+  const grau='background:var(--card2);color:var(--t2)';
+  if(b.storniert_durch) return `<span class="badge" style="${grau}">storniert durch ${esc(b.storniert_durch)}</span>`;
+  if(b.verrechnet_in) return `<span class="badge" style="${grau}">in Schlussrechnung ${esc(b.verrechnet_in)}</span>`;
+  if(b.betrag_status==='pruefen') return '<span class="badge b-accent">bitte prüfen</span>';
+  return '<span class="badge b-green">✓</span>';
+}
+
+// Liste in der Projektkarte (eingeklappt)
+function renderAusgangsBelegListe(liste){
+  if(!liste.length) return '';
+  const zeilen=[...liste].sort((a,b)=>(b.nummer||'').localeCompare(a.nummer||'')).map(b=>`<tr>
+      <td>${esc(b.nummer||'–')}</td><td>${AB_ART[b.belegart]||'–'}</td><td>${b.datum?fmt(b.datum):'–'}</td>
+      <td style="text-align:right;white-space:nowrap">${b.netto!=null?num(b.netto)+' €':'–'}</td>
+      <td>${abStatusBadge(b)}</td>
+      <td style="white-space:nowrap"><button class="btn btn-blue btn-sm" onclick="openBelegPdf(${b.id})">📄</button>${b.betrag_status==='pruefen'&&b.status==='neu'?` <button class="edit-btn" onclick="openAusgangModal(${b.id})" title="prüfen">✏</button>`:''}</td>
+    </tr>`).join('');
+  return `<details style="padding:0 18px 12px"><summary style="cursor:pointer;font-size:13px;color:var(--t2)">📤 ${liste.length} eigene Beleg${liste.length!==1?'e':''} aus OneDrive (Rechnungen, Auftragsbestätigungen)</summary>
+    <div style="overflow-x:auto;margin-top:8px"><table class="ctrl-table">
+      <thead><tr><th>Nr.</th><th>Art</th><th>Datum</th><th style="text-align:right">Netto</th><th>Status</th><th></th></tr></thead>
+      <tbody>${zeilen}</tbody></table></div></details>`;
+}
+
+// ── Reiter „Eigene Belege“: Kunde/Projekt zuordnen + Belege „bitte prüfen“ ──
+function renderAusgangsbelege(){
+  const el=document.getElementById('ctrl-belege-content');
+  if(!el) return;
+  if(!ausgangsBelege.length&&!ausgangsGruppen.length){
+    el.innerHTML=`<div class="ctrl-section"><div class="ctrl-section-title"><span>📤</span> Eigene Belege</div>
+      <div style="font-size:13px;color:var(--t2);line-height:1.6">Noch keine Belege da. Sie kommen automatisch von deinem PC aus OneDrive
+      (003 Rechnungen und 002 Aufträge, ab 2025).</div></div>`;
+    return;
+  }
+  const wahl=projects.filter(p=>p.typ==='laufend'||p.typ==='abgeschlossen').sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'));
+  const anzahl={};
+  ausgangsBelege.forEach(b=>{ if(b.gruppe&&b.status!=='ersetzt') anzahl[b.gruppe]=(anzahl[b.gruppe]||0)+1; });
+  const status=g=> g.quelle==='manuell' ? (g.projekt_id!=null?'zugeordnet':'ignoriert') : 'offen';
+  const rang={offen:0, zugeordnet:1, ignoriert:2};
+  const liste=[...ausgangsGruppen].sort((a,b)=>rang[status(a)]-rang[status(b)]
+    || (b.vorschlag_projekt_id!=null)-(a.vorschlag_projekt_id!=null) || abOrdnerKurz(a.beispiel).localeCompare(abOrdnerKurz(b.beispiel),'de'));
+  const badge={offen:'<span class="badge b-accent">offen</span>', zugeordnet:'<span class="badge b-green">zugeordnet</span>',
+    ignoriert:'<span class="badge" style="background:var(--card2);color:var(--t2)">ignoriert</span>'};
+  const zugeordnet=new Set(ausgangsGruppen.filter(g=>g.quelle==='manuell'&&g.projekt_id!=null).map(g=>g.gruppe));
+  const pruefen=ausgangsBelege.filter(b=>b.status==='neu'&&b.betrag_status==='pruefen')
+    .sort((a,b)=>(zugeordnet.has(b.gruppe)-zugeordnet.has(a.gruppe)) || (b.nummer||'').localeCompare(a.nummer||''));
+  const zuletzt=ausgangsBelege.reduce((m,b)=>b.ausgelesen_am&&b.ausgelesen_am>m?b.ausgelesen_am:m,'');
+  const nOffen=liste.filter(g=>status(g)==='offen').length;
+
+  el.innerHTML=`<div class="ctrl-section">
+    <div class="ctrl-section-title"><span>📤</span> Eigene Belege – Kunde/Projekt zuordnen</div>
+    <div style="font-size:13px;color:var(--t2);margin-bottom:12px;line-height:1.6">
+      ${ausgangsBelege.length} Belege aus OneDrive${zuletzt?` · zuletzt ausgelesen ${new Date(zuletzt).toLocaleString('de-DE',{dateStyle:'short',timeStyle:'short'})}`:''}.
+      ${nOffen?`<b>${nOffen} noch offen.</b> `:''}Nichts wird automatisch zugeordnet: Vorschläge sind vorausgewählt, gelten aber erst mit ✓.<br>
+      Kundenrechnungen erscheinen nach dem Zuordnen beim nächsten Abgleich (stündlich) auf der Seite „Rechnungen“,
+      die Auftragssumme sofort.
+    </div>
+    ${liste.map((g,i)=>{
+      const st=status(g);
+      const vorwahl=g.projekt_id ?? (st==='offen'?g.vorschlag_projekt_id:null);
+      const n=anzahl[g.gruppe]||0;
+      return`<div class="ab-zeile">
+        <div class="ab-kopf">
+          <div style="min-width:0"><b>${esc(abGruppeName(g.beispiel))}</b>
+            <div class="ab-sub">${n} Beleg${n!==1?'e':''}${/^AuftragsNr/i.test(g.beispiel||'')?' · Auftragsbestätigung':''}${st==='offen'&&g.vorschlag_projekt_id?' · mit Vorschlag':''}</div></div>
+          ${badge[st]}
+        </div>
+        <div class="ab-aktion">
+          <select class="fs" id="ag-sel-${i}">
+            <option value="">— Projekt wählen —</option>
+            ${wahl.map(p=>`<option value="${p.id}" ${String(p.id)===String(vorwahl)?'selected':''}>${esc(p.name)}</option>`).join('')}
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="saveAusgangsGruppe(${i},'zuordnen')">✓ Zuordnen</button>
+          ${st!=='ignoriert'?`<button class="btn btn-ghost btn-sm" onclick="saveAusgangsGruppe(${i},'ignorieren')">Ignorieren</button>`:''}
+        </div>
+      </div>`;}).join('')}
+  </div>
+  <div class="ctrl-section" style="margin-top:16px">
+    <div class="ctrl-section-title"><span>⚠</span> Bitte prüfen (${pruefen.length})</div>
+    <div style="font-size:13px;color:var(--t2);margin-bottom:12px;line-height:1.6">
+      Nicht sicher gelesen, z. B. reine Bild-PDFs (Texterkennung), mehrere Fassungen im Ordner oder ein Storno ohne genannte Rechnungsnummer.
+      ✓ übernimmt den Vorschlag, ✏ zum Korrigieren. Zählt erst danach.
+    </div>
+    ${pruefen.length?pruefen.map(b=>`<div class="ab-zeile">
+        <div class="ab-kopf">
+          <div style="min-width:0"><b>${esc(b.nummer||'–')}</b> · ${AB_ART[b.belegart]||'Beleg'}
+            <div class="ab-sub">${esc(abOrdnerKurz(b.ordner))}${zugeordnet.has(b.gruppe)?'':' · noch keinem Projekt zugeordnet'}</div></div>
+          <div style="font-family:'Bebas Neue',sans-serif;font-size:20px;white-space:nowrap">${b.netto!=null?num(b.netto)+' €':'–'}</div>
+        </div>
+        <div style="font-size:12px;color:var(--orange);margin-top:4px">${esc(b.betrag_hinweis||'')}</div>
+        <div class="ab-aktion">
+          <button class="btn btn-blue btn-sm" onclick="openBelegPdf(${b.id})">📄 PDF</button>
+          ${b.netto!=null||(b.belegart==='storno'&&b.bezug_nummer)?`<button class="btn btn-primary btn-sm" onclick="bestaetigeAusgang(${b.id})">✓ Stimmt</button>`:''}
+          <button class="btn btn-ghost btn-sm" onclick="openAusgangModal(${b.id})">✏ Korrigieren</button>
+        </div>
+      </div>`).join(''):'<div class="cp-leer" style="padding-left:0">Nichts zu prüfen 👍</div>'}
+  </div>`;
+  el._liste=liste;
+}
+
+async function saveAusgangsGruppe(i, aktion){
+  const g=document.getElementById('ctrl-belege-content')._liste[i];
+  if(!g) return;
+  let projektId=null;
+  if(aktion==='zuordnen'){
+    projektId=Number(document.getElementById('ag-sel-'+i).value)||null;
+    if(!projektId){ toast('Bitte zuerst ein Projekt wählen','var(--orange)'); return; }
+  }
+  try{
+    const res=await fetch(`${SB_URL}/rest/v1/ausgangs_gruppen?gruppe=${pgEq(g.gruppe)}`,{
+      method:'PATCH', headers:sbHeaders, body:JSON.stringify({projekt_id:projektId, quelle:'manuell', aktualisiert_am:new Date().toISOString()})
+    });
+    if(!res.ok) throw new Error('gruppe '+res.status);
+    g.projekt_id=projektId; g.quelle='manuell';
+    renderControlling();
+    toast(aktion==='zuordnen'?'✅ Zugeordnet – Kundenrechnungen folgen beim nächsten Abgleich':'Wird ignoriert');
+  }catch(e){
+    console.warn(e);
+    toast('⚠ Nicht gespeichert – keine Verbindung?','var(--red)');
+  }
+}
+
+async function speichereAusgang(id, felder){
+  const res=await fetch(`${SB_URL}/rest/v1/ausgangsbelege?id=eq.${id}`,{
+    method:'PATCH', headers:sbHeaders,
+    body:JSON.stringify({...felder, betrag_status:'bestaetigt', aktualisiert_am:new Date().toISOString()})
+  }).catch(()=>null);
+  if(!res||!res.ok){ toast('⚠ Nicht gespeichert – keine Verbindung?','var(--red)'); return false; }
+  const b=ausgangsBelege.find(x=>x.id===id);
+  if(b) Object.assign(b, felder, {betrag_status:'bestaetigt'});
+  return true;
+}
+
+async function bestaetigeAusgang(id){
+  const b=ausgangsBelege.find(x=>x.id===id);
+  if(!b) return;
+  if(await speichereAusgang(id, {})){ renderControlling(); toast('✔ Bestätigt'); }
+}
+
+function openAusgangModal(id){
+  const b=ausgangsBelege.find(x=>x.id===id);
+  if(!b) return;
+  const wert=v=>v!=null?v:'';
+  document.getElementById('abb-id').value=id;
+  document.getElementById('abb-info').textContent=`${AB_ART[b.belegart]||'Beleg'} ${b.nummer||''} · ${abOrdnerKurz(b.ordner)}`;
+  document.getElementById('abb-hinweis').textContent=b.betrag_hinweis?('Hinweis beim Auslesen: '+b.betrag_hinweis):'';
+  document.getElementById('abb-netto-lbl').textContent=b.belegart==='schluss'?'Gesamt netto (€) *':'Netto (€) *';
+  document.getElementById('abb-netto').value=wert(b.netto);
+  document.getElementById('abb-brutto').value=wert(b.brutto);
+  document.getElementById('abb-rest-row').style.display=b.belegart==='schluss'?'':'none';
+  document.getElementById('abb-rest-netto').value=wert(b.rest_netto);
+  document.getElementById('abb-rest-brutto').value=wert(b.rest_brutto);
+  document.getElementById('abb-bezug-row').style.display=b.belegart==='storno'?'':'none';
+  document.getElementById('abb-bezug').value=b.bezug_nummer||'';
+  document.getElementById('modal-ab-betrag').style.display='flex';
+}
+
+async function saveAusgangModal(){
+  const id=Number(document.getElementById('abb-id').value);
+  const b=ausgangsBelege.find(x=>x.id===id);
+  if(!b) return;
+  const lies=f=>{ const n=parseFloat(document.getElementById(f).value); return isNaN(n)?null:Math.round(n*100)/100; };
+  const netto=lies('abb-netto'), brutto=lies('abb-brutto');
+  const felder={};
+  if(b.belegart==='storno'){
+    felder.bezug_nummer=document.getElementById('abb-bezug').value.trim()||null;
+    if(!felder.bezug_nummer){ toast('Bitte die stornierte Rechnungsnummer eintragen','var(--orange)'); return; }
+  } else if(netto==null||brutto==null){ toast('Bitte Netto und Brutto eintragen','var(--orange)'); return; }
+  if(netto!=null&&brutto!=null) Object.assign(felder, {netto, brutto, mwst:Math.round((brutto-netto)*100)/100});
+  if(b.belegart==='schluss'){ felder.rest_netto=lies('abb-rest-netto')??netto; felder.rest_brutto=lies('abb-rest-brutto')??brutto; }
+  else if(['abschlag','rechnung'].includes(b.belegart)){ felder.rest_netto=netto; felder.rest_brutto=brutto; }
+  if(await speichereAusgang(id, felder)){
+    closeModal('modal-ab-betrag');
+    renderControlling();
+    toast('✔ Gespeichert – zählt ab jetzt');
+  }
+}
+
 async function handleCtrlPdfUpload(e, defaultProjId){
   const files=Array.from(e.target.files); if(!files.length) return;
   for(const file of files){
@@ -2973,7 +3401,7 @@ function openDetail(id){
   const pTodos=todos.filter(t=>t.projId===id);
   const pFotos=fotos.filter(f=>f.projId===id);
   const pRech=rechnungen.filter(r=>r.projId===id);
-  const rechSum=pRech.reduce((a,r)=>a+r.betrag,0);
+  const rechSum=pRech.filter(rechZaehlt).reduce((a,r)=>a+r.betrag,0);
   const rechBez=pRech.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+r.betrag,0);
   const isAng=p.typ==='angebot'||p.typ==='angebot-offen';
 
@@ -3027,7 +3455,7 @@ function openDetail(id){
         <div class="rech-r">
           <span class="rs-badge ${rs.cls}">${rs.lbl}</span>
           <div style="display:flex;gap:5px;margin-top:4px">
-            ${r.pdfData?`<button class="btn-blue btn btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄</button>`:''}
+            ${r.pdfData||r.belegPfad?`<button class="btn-blue btn btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄</button>`:''}
             <button class="del-btn" data-id="${rid}" data-projid="${id}" onclick="delRechInDetail(this.dataset.id,this.dataset.projid)">🗑</button>
           </div>
         </div>
@@ -3066,7 +3494,7 @@ function openDetail(id){
           ${p.ort?`<div class="ditem"><div class="ditem-lbl">Ort</div><div class="ditem-val">📍 ${p.ort}</div></div>`:''}
           ${p.start?`<div class="ditem"><div class="ditem-lbl">Start</div><div class="ditem-val">${fmt(p.start)}</div></div>`:''}
           ${p.ende?`<div class="ditem"><div class="ditem-lbl">Ende</div><div class="ditem-val">${fmt(p.ende)}</div></div>`:''}
-          ${(p.wertNetto||p.wert)?`<div class="ditem"><div class="ditem-lbl">Auftragssumme Netto</div><div class="ditem-val" style="color:var(--green)">💶 ${num(p.wertNetto||p.wert)} €</div></div>`:''}
+          ${auftragsInfo(p).netto?`<div class="ditem"><div class="ditem-lbl">Auftragssumme Netto</div><div class="ditem-val" style="color:var(--green)">💶 ${num(auftragsInfo(p).netto)} €</div></div>`:''}
           ${p.wert&&p.wertNetto?`<div class="ditem"><div class="ditem-lbl">Brutto inkl. ${p.wertMwst||'19%'} MwSt</div><div class="ditem-val" style="color:var(--t2)">💶 ${num(p.wert)} €</div></div>`:''}
           ${p.email?`<div class="ditem"><div class="ditem-lbl">E-Mail Kunde</div><div class="ditem-val"><a href="mailto:${p.email}" style="color:var(--blue)">${p.email}</a></div></div>`:''}
           <div class="ditem"><div class="ditem-lbl">Erfasste Stunden</div><div class="ditem-val" style="color:var(--accent)">⏱ ${hrs} Std.</div></div>
@@ -3178,7 +3606,7 @@ function openBaufDialog(id){
   document.getElementById('bauf-info').innerHTML=`
     <div class="bauf-row"><span class="bauf-lbl">Projekt</span><strong>${p.name}</strong></div>
     ${p.kunde?`<div class="bauf-row"><span class="bauf-lbl">Kunde</span><span>${p.kunde}</span></div>`:''}
-    ${(p.wertNetto||p.wert)?`<div class="bauf-row"><span class="bauf-lbl">Auftragssumme Netto</span><span style="color:var(--green);font-weight:700">💶 ${num(p.wertNetto||p.wert)} €</span></div>`:''}
+    ${auftragsInfo(p).netto?`<div class="bauf-row"><span class="bauf-lbl">Auftragssumme Netto</span><span style="color:var(--green);font-weight:700">💶 ${num(auftragsInfo(p).netto)} €</span></div>`:''}
     ${p.wert&&p.wertNetto?`<div class="bauf-row"><span class="bauf-lbl">Brutto (inkl. ${p.wertMwst||'19%'} MwSt)</span><span>💶 ${num(p.wert)} €</span></div>`:''}
   `;
   document.getElementById('bauf-start').value=today();
@@ -3511,6 +3939,7 @@ function calcNetto(){
 
 function openPdf(rechId){
   const r=rechnungen.find(x=>String(x.id)===String(rechId));
+  if(r&&!r.pdfData&&r.belegPfad){ openBelegPdf(r.belegPfad); return; }   // aus OneDrive übernommen (Teil E)
   if(!r||!r.pdfData){toast('⚠ Kein PDF hinterlegt','var(--orange)');return;}
   try {
     const base64=r.pdfData.split(',')[1];
@@ -3586,7 +4015,8 @@ function saveRech(){
     if(i>-1){
       if(!currentRechPdfData && rechnungen[i].pdfData){ r.pdfData=rechnungen[i].pdfData; r.pdfName=rechnungen[i].pdfName; }
       r.id=rechnungen[i].id; // ID-Typ beibehalten
-      r._syncSession=SYNC_SESSION; rechnungen[i]=r;
+      // Zusatzfelder behalten (z. B. quelle/belegId/belegPfad/_auto bei Rechnungen aus OneDrive)
+      r._syncSession=SYNC_SESSION; rechnungen[i]={...rechnungen[i], ...r};
     } else {
       // Fallback: als neue Rechnung anlegen
       r._syncSession=SYNC_SESSION; rechnungen.unshift(r);
@@ -3603,6 +4033,7 @@ function saveRech(){
 
 function toggleRech(id){
   const r=rechnungen.find(x=>String(x.id)===String(id));if(!r)return;
+  if(r.status==='storniert'){ toast('Stornierte Rechnung – Status bei Bedarf über ✏ ändern','var(--orange)'); return; }
   r.status=r.status==='bezahlt'?'offen':'bezahlt';
   r.bezam=r.status==='bezahlt'?today():'';
   r._syncSession=SYNC_SESSION;
@@ -3654,7 +4085,7 @@ function renderRechnungen(data){
   // Stats: always based on year filter if set, else all
   const base = yearFilter ? rechnungen.filter(r=>(r.datum||'').startsWith(yearFilter)) : rechnungen;
   const bez=base.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
-  const off=base.filter(r=>r.status!=='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
+  const off=base.filter(r=>r.status!=='bezahlt'&&rechZaehlt(r)).reduce((a,r)=>a+(r.netto||r.betrag),0);
   const mah=base.filter(r=>r.status==='mahnung').reduce((a,r)=>a+(r.netto||r.betrag),0);
   document.getElementById('rech-stats').innerHTML=`
     <div class="stat s-accent"><div class="stat-ico">🧾</div><div class="stat-val">${base.length}</div><div class="stat-lbl">Rechnungen${yearFilter?' '+yearFilter:''}</div></div>
@@ -3665,7 +4096,7 @@ function renderRechnungen(data){
 
   let list=data||[...base].sort((a,b)=>b.datum.localeCompare(a.datum));
   if(!data){
-    if(rechFilter==='offen') list=list.filter(r=>r.status!=='bezahlt');
+    if(rechFilter==='offen') list=list.filter(r=>r.status!=='bezahlt'&&rechZaehlt(r));
     else if(rechFilter==='bezahlt') list=list.filter(r=>r.status==='bezahlt');
     else if(rechFilter==='mahnung') list=list.filter(r=>r.status==='mahnung');
   }
@@ -3699,7 +4130,7 @@ function renderRechnungen(data){
           <span class="rs-badge ${rs.cls}">${rs.lbl}</span>
           ${r.netto?`<span style="font-size:11px;color:var(--t2)">Netto: ${num(r.netto)} € · MwSt: ${r.mwstSatz||'19%'}</span>`:''}
           <div style="display:flex;gap:5px;margin-top:4px">
-            ${r.pdfData?`<button class="btn-blue btn btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄 PDF</button>`:''}
+            ${r.pdfData||r.belegPfad?`<button class="btn-blue btn btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄 PDF</button>`:''}
             <button class="btn btn-sm" style="background:rgba(59,130,246,.15);color:#60a5fa;border:1px solid rgba(59,130,246,.25)" data-id="${rid}" onclick="mailtoRechnung(this.dataset.id)" title="Rechnung per Outlook senden">📧</button>
             ${r.status==='offen'||r.status==='mahnung'?`<button class="btn btn-sm" style="background:var(--rdim);color:var(--red);border:1px solid rgba(248,81,73,.25)" data-id="${rid}" onclick="mailtoMahnung(this.dataset.id)" title="Zahlungserinnerung senden">⚠ Mahnung</button>`:''}
             <button class="edit-btn" data-id="${rid}" onclick="editRech(this.dataset.id)">✏</button>
@@ -3749,7 +4180,7 @@ function filterRech(q){
   const yearFilter=getActiveRechYear();
   let list=[...rechnungen].sort((a,b)=>b.datum.localeCompare(a.datum));
   if(yearFilter) list=list.filter(r=>(r.datum||'').startsWith(yearFilter));
-  if(rechFilter==='offen') list=list.filter(r=>r.status!=='bezahlt');
+  if(rechFilter==='offen') list=list.filter(r=>r.status!=='bezahlt'&&rechZaehlt(r));
   else if(rechFilter==='bezahlt') list=list.filter(r=>r.status==='bezahlt');
   else if(rechFilter==='mahnung') list=list.filter(r=>r.status==='mahnung');
   if(q) list=list.filter(r=>{const p=projects.find(x=>x.id===r.projId);return(r.nr+r.beschr+(p?p.name:'')+r.notiz).toLowerCase().includes(q);});
@@ -3771,7 +4202,7 @@ function renderRechProjekt(){
   em.style.display='none';
   c.innerHTML=pw.map(p=>{
     const pr=rechnungen.filter(r=>r.projId===p.id).sort((a,b)=>b.datum.localeCompare(a.datum));
-    const total=pr.reduce((a,r)=>a+(r.netto||r.betrag),0);
+    const total=pr.filter(rechZaehlt).reduce((a,r)=>a+(r.netto||r.betrag),0);
     const bez=pr.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
     const off=total-bez;
     const pct=total>0?Math.round(bez/total*100):0;
@@ -3798,7 +4229,7 @@ function renderRechProjekt(){
           <div class="rech-r">
             <span class="rs-badge ${rs.cls}">${rs.lbl}</span>
             <div style="display:flex;gap:5px;margin-top:4px">
-              ${r.pdfData?`<button class="btn-blue btn btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄</button>`:''}
+              ${r.pdfData||r.belegPfad?`<button class="btn-blue btn btn-sm" data-id="${rid}" onclick="openPdf(this.dataset.id)">📄</button>`:''}
               <button class="del-btn" data-id="${rid}" onclick="delRechAndRefresh(this.dataset.id)">🗑</button>
             </div>
           </div>
@@ -5144,7 +5575,7 @@ function renderPrintPreview(){
   const totalH=mZ.reduce((a,z)=>a+z.std,0);
   const totalL=workers.reduce((a,w)=>{const h=mZ.filter(z=>z.maId===w.id).reduce((x,z)=>x+z.std,0);return a+h*(w.lohn||0);},0);
   const rechBez=mR.filter(r=>r.status==='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
-  const rechOff=mR.filter(r=>r.status!=='bezahlt').reduce((a,r)=>a+(r.netto||r.betrag),0);
+  const rechOff=mR.filter(r=>r.status!=='bezahlt'&&rechZaehlt(r)).reduce((a,r)=>a+(r.netto||r.betrag),0);
 
   const azRows=workers.map(w=>{
     const wZ=mZ.filter(z=>z.maId===w.id);
@@ -7550,8 +7981,9 @@ async function loadFromCloud(){
     setSyncStatus('offline');
     toast('⚠ Offline – lokale Daten werden verwendet','var(--orange)');
   }
-  // Eingangsrechnungen (eigene Tabellen, nur Admin) – nicht im Gerätespeicher
+  // Eingangsrechnungen und eigene Belege (eigene Tabellen, nur Admin) – nicht im Gerätespeicher
   await loadEingangsrechnungen();
+  await loadAusgangsbelege();
 }
 
 

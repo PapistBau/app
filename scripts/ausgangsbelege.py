@@ -487,7 +487,9 @@ def plane_rechnungen(belege, zuordnung, eintraege, geloescht, bezahlt_bis=None):
     eintraege: id(str) → data der Tabelle rechnungen · geloescht: Menge gelöschter ids (deleted_ids).
     Liefert (schreiben: {id: data}, verknuepfen: {beleg_id: rechnung_id})."""
     schreiben, verknuepfen = {}, {}
-    manuell = {nr_norm(d.get("nr")): i for i, d in eintraege.items() if d.get("quelle") != "beleg" and d.get("nr")}
+    # von Andy gelöschte eigene Einträge zählen nicht als „schon erfasst“ (sonst bliebe die Rechnung unsichtbar)
+    manuell = {nr_norm(d.get("nr")): i for i, d in eintraege.items()
+               if i not in geloescht and d.get("quelle") != "beleg" and d.get("nr")}
     for b in belege:
         if b.get("quelle") != "rechnung" or b.get("status") != "neu" or b.get("belegart") not in RECHNUNGSARTEN:
             continue
@@ -498,7 +500,7 @@ def plane_rechnungen(belege, zuordnung, eintraege, geloescht, bezahlt_bis=None):
         rid = b.get("rechnung_id")
         if rid:
             d = eintraege.get(str(rid))
-            if d is None or d.get("quelle") != "beleg":
+            if d is None or str(rid) in geloescht or d.get("quelle") != "beleg":
                 continue                       # von Andy gelöscht bzw. sein eigener Eintrag → nicht anfassen
             auto = dict(d.get("_auto") or {})
             neu = dict(d)
@@ -858,6 +860,12 @@ def selbsttest():
     # Andy hat sie schon selbst erfasst (andere Schreibweise der Nummer) → nur verknüpfen
     schreiben, verkn = plane_rechnungen(belege, {"g": 77}, {"123": {"nr": "04951/26", "betrag": 5}}, set())
     assert verkn[14] == "123" and str(ID_BASIS + 14) not in schreiben, (schreiben, verkn)
+    # … aber Andys eigenen Eintrag gelöscht → zählt nicht, Rechnung wird aus dem Beleg angelegt
+    schreiben, verkn = plane_rechnungen(belege, {"g": 77}, {"123": {"nr": "04951/26", "betrag": 5}}, {"123"})
+    assert verkn[14] == str(ID_BASIS + 14) and str(ID_BASIS + 14) in schreiben, (schreiben, verkn)
+    # schon verknüpfter Eintrag später gelöscht → nicht mehr anfassen
+    s, _ = plane_rechnungen([dict(belege[0], rechnung_id="123")], {"g": 77}, {"123": {"nr": "x", "quelle": "beleg"}}, {"123"})
+    assert s == {}, s
     # von Andy gelöscht → nicht wieder anlegen
     schreiben, verkn = plane_rechnungen(belege, {"g": 77}, {}, {str(ID_BASIS + 13)})
     assert str(ID_BASIS + 13) not in schreiben, schreiben
