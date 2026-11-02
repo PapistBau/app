@@ -394,6 +394,12 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 .ab-sub{font-size:12px;color:var(--t2);margin-top:2px;}
 .ab-aktion{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;}
 .ab-aktion .fs{flex:1 1 220px;min-width:0;padding:6px 8px;}
+.ab-belege{margin-top:6px;}
+.ab-belege summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--blue);padding:4px 0;}
+.ab-beleg{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px dashed var(--border);font-size:13px;}
+.ab-bel-text{flex:1;min-width:0;}
+.ab-bel-betrag{white-space:nowrap;font-weight:600;}
+.ab-proj-info{font-size:12px;color:var(--t2);margin-top:6px;line-height:1.4;}
 .ctrl-proj-name{font-weight:700;font-size:15px;flex:1;min-width:0;}
 .ctrl-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;padding:16px 18px;}
 .ctrl-kpi{text-align:center;background:var(--card2);border-radius:var(--r2);padding:12px 8px;}
@@ -2943,6 +2949,30 @@ async function openBelegPdf(idOderPfad){
   }
 }
 
+// Zuordnen: ein Beleg der Gruppe mit PDF-Knopf, damit Andy vor dem ✓ nachsehen kann
+function abBelegZeile(b){
+  const sub=[b.datum?fmt(b.datum):'ohne Datum'];
+  if(b.belegart==='schluss'&&b.rest_netto!=null) sub.push(`Gesamt · Rest ${eur2(b.rest_netto)}`);
+  if(b.storniert_durch) sub.push(`storniert durch ${esc(b.storniert_durch)}`);
+  if(b.verrechnet_in) sub.push(`in Schlussrechnung ${esc(b.verrechnet_in)}`);
+  if(b.betrag_status==='pruefen') sub.push('⚠ bitte prüfen');
+  return `<div class="ab-beleg">
+    <div class="ab-bel-text"><b>${esc(b.nummer||'–')}</b> · ${AB_ART[b.belegart]||'Beleg'}<div class="ab-sub">${sub.join(' · ')}</div></div>
+    <div class="ab-bel-betrag">${b.netto!=null?eur2(b.netto):'–'}</div>
+    <button class="btn btn-blue btn-sm" onclick="openBelegPdf(${b.id})" title="PDF öffnen">📄</button>
+  </div>`;
+}
+
+// Zuordnen: Eckdaten des gewählten Projekts zum Vergleich mit den Belegen
+function abProjektInfo(pid){
+  const p=projects.find(x=>String(x.id)===String(pid));
+  if(!p) return '';
+  const a=auftragsInfo(p);
+  const teile=[p.kunde?'👤 '+esc(p.kunde):'', p.ort?'📍 '+esc(p.ort):'', p.typ==='laufend'?'laufend':p.typ==='abgeschlossen'?'abgeschlossen':'',
+    'Auftrag '+(a.netto?num(a.netto)+' € netto':'–')];
+  return 'Gewähltes Projekt: '+teile.filter(Boolean).join(' · ');
+}
+
 function abStatusBadge(b){
   const grau='background:var(--card2);color:var(--t2)';
   if(b.storniert_durch) return `<span class="badge" style="${grau}">storniert durch ${esc(b.storniert_durch)}</span>`;
@@ -2977,8 +3007,8 @@ function renderAusgangsbelege(){
     return;
   }
   const wahl=projects.filter(p=>p.typ==='laufend'||p.typ==='abgeschlossen').sort((a,b)=>(a.name||'').localeCompare(b.name||'','de'));
-  const anzahl={};
-  ausgangsBelege.forEach(b=>{ if(b.gruppe&&b.status!=='ersetzt') anzahl[b.gruppe]=(anzahl[b.gruppe]||0)+1; });
+  const belegeVon={};
+  ausgangsBelege.forEach(b=>{ if(b.gruppe&&b.status!=='ersetzt') (belegeVon[b.gruppe]=belegeVon[b.gruppe]||[]).push(b); });
   const status=g=> g.quelle==='manuell' ? (g.projekt_id!=null?'zugeordnet':'ignoriert') : 'offen';
   const rang={offen:0, zugeordnet:1, ignoriert:2};
   const liste=[...ausgangsGruppen].sort((a,b)=>rang[status(a)]-rang[status(b)]
@@ -3002,21 +3032,24 @@ function renderAusgangsbelege(){
     ${liste.map((g,i)=>{
       const st=status(g);
       const vorwahl=g.projekt_id ?? (st==='offen'?g.vorschlag_projekt_id:null);
-      const n=anzahl[g.gruppe]||0;
+      const belege=(belegeVon[g.gruppe]||[]).sort((a,b)=>(a.datum||'').localeCompare(b.datum||'')||(a.nummer||'').localeCompare(b.nummer||''));
+      const n=belege.length;
       return`<div class="ab-zeile">
         <div class="ab-kopf">
           <div style="min-width:0"><b>${esc(abGruppeName(g.beispiel))}</b>
             <div class="ab-sub">${n} Beleg${n!==1?'e':''}${/^AuftragsNr/i.test(g.beispiel||'')?' · Auftragsbestätigung':''}${st==='offen'&&g.vorschlag_projekt_id?' · mit Vorschlag':''}</div></div>
           ${badge[st]}
         </div>
+        ${n?`<details class="ab-belege"><summary>Belege ansehen (${n})</summary>${belege.map(abBelegZeile).join('')}</details>`:''}
         <div class="ab-aktion">
-          <select class="fs" id="ag-sel-${i}">
+          <select class="fs" id="ag-sel-${i}" onchange="document.getElementById('ag-info-${i}').innerHTML=abProjektInfo(this.value)">
             <option value="">— Projekt wählen —</option>
             ${wahl.map(p=>`<option value="${p.id}" ${String(p.id)===String(vorwahl)?'selected':''}>${esc(p.name)}</option>`).join('')}
           </select>
           <button class="btn btn-primary btn-sm" onclick="saveAusgangsGruppe(${i},'zuordnen')">✓ Zuordnen</button>
           ${st!=='ignoriert'?`<button class="btn btn-ghost btn-sm" onclick="saveAusgangsGruppe(${i},'ignorieren')">Ignorieren</button>`:''}
         </div>
+        <div class="ab-proj-info" id="ag-info-${i}">${abProjektInfo(vorwahl)}</div>
       </div>`;}).join('')}
   </div>
   <div class="ctrl-section" style="margin-top:16px">
