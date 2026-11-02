@@ -1148,6 +1148,11 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
   <input type="hidden" id="auf-proj">
   <div style="font-size:13px;color:var(--t2);margin-bottom:12px;line-height:1.6" id="auf-info"></div>
   <div class="fg"><label class="fl">Von Hand festlegen – Netto (€)</label><input type="number" class="fi" id="auf-wert" step="0.01" placeholder="leer = automatisch"></div>
+  <div class="fg"><label class="fl">Deine Zahl gilt …</label>
+    <select class="fi" id="auf-art">
+      <option value="bisSR">bis zur Schlussrechnung</option>
+      <option value="immer">immer – auch nach der Schlussrechnung</option>
+    </select></div>
   <div class="mfooter">
     <button class="btn btn-ghost" onclick="saveAuftragModal(true)">Festlegung entfernen</button>
     <button class="btn btn-ghost" onclick="closeModal('modal-auftrag')">Abbrechen</button>
@@ -2330,7 +2335,7 @@ function renderControlling(){
           <button class="del-btn" data-id="${rid}" onclick="confirmDeleteRech(this.dataset.id)">🗑</button>
         </td>
       </tr>`;}).join('');
-    const urspruenglich=auf.urspr&&auf.quelle!=='ursprung'&&auf.quelle!=='manuell'&&Math.abs(auf.urspr-auftragsNetto)>0.005;
+    const urspruenglich=auf.urspr&&auf.quelle!=='ursprung'&&Math.abs(auf.urspr-auftragsNetto)>0.005;
 
     return`<div class="ctrl-proj-card${ctrlAuf.has(String(p.id))?'':' zu'}" data-id="${p.id}" data-typ="${p.typ}"
         data-such="${esc([p.name,p.kunde,p.ort].filter(Boolean).join(' ').toLowerCase())}">
@@ -2529,23 +2534,33 @@ function ausgangsBelegeVon(p){
   return ausgangsBelege.filter(b=>gruppen.has(b.gruppe)&&b.status!=='ersetzt');
 }
 
+// Rangfolge (Andy 02.11.): ✏ „immer“ > Schlussrechnung > ✏ „bis zur Schlussrechnung“ > Rechnungen > Auftragsbestätigung > ursprünglich.
+// Ältere Festlegungen ohne wertManuellArt gelten wie bisher „immer“.
 function auftragsInfo(p){
   const urspr=Number(p.wertNetto||p.wert||0)||null;
-  if(p.wertManuell!=null&&p.wertManuell!=='') return {netto:Number(p.wertManuell), quelle:'manuell', text:'von Hand festgelegt', urspr};
+  const hand=p.wertManuell!=null&&p.wertManuell!==''?Number(p.wertManuell):null;
+  if(hand!=null&&p.wertManuellArt!=='bisSR') return {netto:hand, quelle:'manuell', text:'von Hand festgelegt · gilt immer', urspr};
   const belege=ausgangsBelegeVon(p).filter(b=>b.status==='neu');
   const gut=b=>['sicher','bestaetigt'].includes(b.betrag_status)&&b.netto!=null;
   const rech=belege.filter(b=>b.quelle==='rechnung'&&!b.storniert_durch);
   const sr=rech.filter(b=>b.belegart==='schluss'), einzel=rech.filter(b=>b.belegart==='rechnung');
   const azOffen=rech.filter(b=>b.belegart==='abschlag'&&!b.verrechnet_in);
   const unsicher=[...sr,...einzel,...azOffen].some(b=>!gut(b));
+  let auto=null;
   if((sr.length||einzel.length)&&!azOffen.length&&!unsicher){
     const netto=Math.round([...sr,...einzel].reduce((a,b)=>a+Number(b.netto),0)*100)/100;
     const text=sr.length
       ? `aus Schlussrechnung ${sr.map(b=>b.nummer).join(', ')}${einzel.length?` + ${einzel.length} Rechnung${einzel.length>1?'en':''}`:''}`
       : (einzel.length===1?`aus Rechnung ${einzel[0].nummer}`:`Summe aus ${einzel.length} Rechnungen`);
-    return {netto, quelle:sr.length?'schluss':'rechnungen', text, urspr};
+    auto={netto, quelle:sr.length?'schluss':'rechnungen', text, urspr};
   }
   const grund=belege.length?(unsicher?'Rechnungsbeträge noch prüfen':(azOffen.length?'Schlussrechnung steht noch aus':'')):'';
+  // Festlegung „bis zur Schlussrechnung“: nur eine (sichere) Schlussrechnung löst sie ab, Einzelrechnungen nicht
+  if(hand!=null){
+    if(auto&&sr.length) return {...auto, text:`${auto.text} · deine Festlegung (${num(hand)} €) ist damit abgelöst`};
+    return {netto:hand, quelle:'manuell', text:'von Hand festgelegt · gilt bis zur Schlussrechnung'+(grund?' · '+grund:''), urspr};
+  }
+  if(auto) return auto;
   const ab=belege.filter(b=>b.quelle==='auftrag'&&gut(b));
   if(ab.length){
     const netto=Math.round(ab.reduce((a,b)=>a+Number(b.netto),0)*100)/100;
@@ -2562,8 +2577,12 @@ function openAuftragModal(projId){
   document.getElementById('auf-info').innerHTML=`<b>${esc(p.name)}</b><br>`
     +`Automatisch: ${ohne.netto?num(ohne.netto)+' €':'–'}${ohne.text?' ('+esc(ohne.text)+')':''}<br>`
     +`Ursprünglich eingetragen: ${ohne.urspr?num(ohne.urspr)+' €':'–'}<br>`
-    +`Eine Festlegung von Hand hat Vorrang vor allem anderen.`;
-  document.getElementById('auf-wert').value=manuell!=null&&manuell!==''?manuell:'';
+    +`„Bis zur Schlussrechnung“: deine Zahl gilt sofort, sobald die Schlussrechnung da ist, zählt automatisch diese.<br>`
+    +`„Immer“: deine Zahl gilt auch nach der Schlussrechnung (z. B. wenn die Schlussrechnung nicht stimmt).`;
+  const gesetzt=manuell!=null&&manuell!=='';
+  document.getElementById('auf-wert').value=gesetzt?manuell:'';
+  // neue Festlegungen: „bis zur Schlussrechnung“; ältere ohne Angabe galten immer
+  document.getElementById('auf-art').value=gesetzt&&p.wertManuellArt!=='bisSR'?'immer':'bisSR';
   document.getElementById('modal-auftrag').style.display='flex';
 }
 
@@ -2571,7 +2590,8 @@ function saveAuftragModal(entfernen){
   const p=projects.find(x=>String(x.id)===document.getElementById('auf-proj').value); if(!p) return;
   const roh=document.getElementById('auf-wert').value;
   if(!entfernen&&roh===''){ toast('Bitte einen Betrag eintragen oder „Festlegung entfernen“','var(--orange)'); return; }
-  if(entfernen) delete p.wertManuell; else p.wertManuell=Math.round(parseFloat(roh)*100)/100;
+  if(entfernen){ delete p.wertManuell; delete p.wertManuellArt; }
+  else { p.wertManuell=Math.round(parseFloat(roh)*100)/100; p.wertManuellArt=document.getElementById('auf-art').value; }
   p._syncSession=SYNC_SESSION;
   saveAll();
   closeModal('modal-auftrag');
