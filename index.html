@@ -400,6 +400,18 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
 .ab-bel-text{flex:1;min-width:0;}
 .ab-bel-betrag{white-space:nowrap;font-weight:600;}
 .ab-proj-info{font-size:12px;color:var(--t2);margin-top:6px;line-height:1.4;}
+/* Projektsuche über langen Projekt-Auswahllisten */
+.psu{margin-bottom:6px;}
+.psu-in{-webkit-appearance:none;appearance:none;}
+.psu-klein .psu-in{padding:6px 8px;}
+.psu-liste{display:none;margin-top:4px;max-height:min(280px,45vh);overflow-y:auto;background:var(--card2);border:1px solid var(--border);border-radius:var(--r2);}
+.psu-z{padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;line-height:1.35;}
+.psu-z:last-child{border-bottom:none;}
+.psu-z span{display:block;font-size:11px;color:var(--t2);margin-top:1px;}
+.psu-z:hover,.psu-z.psu-akt{background:var(--adim);}
+.psu-z.psu-gew b::after{content:' ✓';color:var(--green);}
+.psu-leer{padding:8px 12px;font-size:12px;color:var(--t2);}
+.fs.psu-ok{border-color:var(--green);box-shadow:0 0 0 2px var(--gdim);}
 .ctrl-proj-name{font-weight:700;font-size:15px;flex:1;min-width:0;}
 .ctrl-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;padding:16px 18px;}
 .ctrl-kpi{text-align:center;background:var(--card2);border-radius:var(--r2);padding:12px 8px;}
@@ -1045,9 +1057,12 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
         <div id="sammel-total" style="font-family:'Bebas Neue',sans-serif;font-size:32px;color:var(--accent)">0,00 €</div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <select class="fs" id="sammel-proj" style="min-width:200px">
-          <option value="">— Projekt wählen —</option>
-        </select>
+        <div style="min-width:200px">
+          <div class="psu" data-sel="sammel-proj"></div>
+          <select class="fs" id="sammel-proj">
+            <option value="">— Projekt wählen —</option>
+          </select>
+        </div>
         <input class="fi" id="sammel-lieferant" placeholder="Lieferant (optional)" style="width:160px">
         <button class="btn btn-primary" onclick="createSammelMaterial()">✅ Als Materialkosten speichern</button>
       </div>
@@ -1169,6 +1184,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div class="fg"><label class="fl">Datum *</label><input type="date" class="fi" id="mat-datum"></div>
   </div>
   <div class="fg"><label class="fl">Projekt *</label>
+    <div class="psu" data-sel="mat-proj"></div>
     <select class="fs" id="mat-proj"></select>
   </div>
   <div class="frow">
@@ -1450,7 +1466,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div class="fg"><label class="fl">Datum *</label><input type="date" class="fi" id="z-datum"></div>
     <div class="fg"><label class="fl">Mitarbeiter *</label><select class="fs" id="z-ma"></select></div>
   </div>
-  <div class="fg"><label class="fl">Baustelle *</label><select class="fs" id="z-bs"></select></div>
+  <div class="fg"><label class="fl">Baustelle *</label><div class="psu" data-sel="z-bs"></div><select class="fs" id="z-bs"></select></div>
   <div class="frow">
     <div class="fg"><label class="fl">Von *</label><select class="fs" id="z-von" onchange="calcZeitStunden()"><option value="">--:--</option>
 <option value="00:00">00:00</option>
@@ -1576,7 +1592,7 @@ header{background:var(--surface);border-bottom:1px solid var(--border);height:56
     <div class="fg"><label class="fl">Rechnungsnr.</label><input class="fi" id="r-nr" placeholder="2025-042"></div>
     <div class="fg"><label class="fl">Datum *</label><input type="date" class="fi" id="r-datum"></div>
   </div>
-  <div class="fg"><label class="fl">Projekt *</label><select class="fs" id="r-proj"></select></div>
+  <div class="fg"><label class="fl">Projekt *</label><div class="psu" data-sel="r-proj"></div><select class="fs" id="r-proj"></select></div>
   <div class="frow">
     <div class="fg"><label class="fl">Netto (€)</label><input type="number" class="fi" id="r-netto" placeholder="0.00" step="0.01" oninput="calcBrutto()"></div>
     <div class="fg"><label class="fl">MwSt.</label>
@@ -2612,6 +2628,76 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 // PostgREST-Filter "gleich" für Texte mit Sonderzeichen (Kommas, Klammern …)
 const pgEq = v => 'eq.' + encodeURIComponent('"' + String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"') + '"');
 
+// ── Projektsuche (Andy 02.11.): Suchfeld über langen Projekt-Auswahllisten. Durchsucht nur die Einträge der zugehörigen
+// Auswahl (deren Regeln bleiben, z. B. nur Projekte mit Stunden); die Auswahl selbst bleibt maßgeblich.
+const PSU_TYP={laufend:'🔵 laufend', abgeschlossen:'✅ abgeschlossen', angebot:'📄 Angebot', 'angebot-offen':'📋 Angebot ausstehend', anfrage:'📬 Anfrage'};
+const psuNorm=s=>String(s||'').toLowerCase().replace(/ß/g,'ss').normalize('NFD').replace(/\p{M}/gu,'')
+  .replace(/ae/g,'a').replace(/oe/g,'o').replace(/ue/g,'u');   // „Müller“ = „Mueller“ = „muller“
+function psuFeld(selId, klein){
+  return `<div class="psu${klein?' psu-klein':''}"><input class="fi psu-in" type="search" data-sel="${selId}" placeholder="🔍 Suche: Projekt, Kunde, Ort"
+    autocomplete="off" enterkeyhint="search" oninput="psuZeige(this,true)" onfocus="psuZeige(this)" onkeydown="psuTaste(event,this)"
+    onblur="setTimeout(()=>psuZu(this),200)"><div class="psu-liste" onmousedown="event.preventDefault()"></div></div>`;
+}
+// feste Platzhalter im HTML (<div class="psu" data-sel="…">) einmalig füllen
+document.querySelectorAll('div.psu[data-sel]').forEach(d=>{ d.outerHTML=psuFeld(d.dataset.sel); });
+function psuZeige(inp, getippt){
+  const liste=inp.nextElementSibling, sel=document.getElementById(inp.dataset.sel);
+  const worte=psuNorm(inp.value).split(/\s+/).filter(Boolean);
+  if(!sel||!worte.length){ liste.style.display='none'; liste.innerHTML=''; return; }
+  const treffer=[...sel.options].filter(o=>o.value).map(o=>{
+    const p=projects.find(x=>String(x.id)===o.value)||{};
+    const name=psuNorm(o.text), alles=name+' '+psuNorm((p.kunde||'')+' '+(p.ort||''));
+    if(!worte.every(w=>alles.includes(w))) return null;
+    return {o, p, rang:worte.every(w=>name.includes(w))?0:1};   // Treffer im Projektnamen zuerst
+  }).filter(Boolean).sort((a,b)=>a.rang-b.rang);
+  const MAX=40;
+  liste.innerHTML=treffer.length
+    ? treffer.slice(0,MAX).map((t,i)=>{
+        const info=[t.p.kunde?'👤 '+esc(t.p.kunde):'', t.p.ort?'📍 '+esc(t.p.ort):'', PSU_TYP[t.p.typ]||''].filter(Boolean).join(' · ');
+        return `<div class="psu-z${i===0?' psu-akt':''}${t.o.value===sel.value?' psu-gew':''}" data-v="${esc(t.o.value)}" onclick="psuWahl(this)">
+          <b>${esc(t.o.text)}</b>${info?`<span>${info}</span>`:''}</div>`;
+      }).join('')+(treffer.length>MAX?`<div class="psu-leer">… und ${treffer.length-MAX} weitere – bitte genauer suchen</div>`:'')
+    : '<div class="psu-leer">Kein passendes Projekt in dieser Auswahl</div>';
+  liste.style.display='block';
+  // Handy: Suchfeld nach oben holen, damit die Trefferliste nicht unter der Tastatur liegt.
+  // Nur den nächsten scrollbaren Bereich (z. B. das Fenster) verschieben, nicht die Seite dahinter.
+  if(getippt&&!inp._psuOben&&window.innerWidth<=768){
+    inp._psuOben=true;
+    let box=inp.parentElement;
+    while(box&&box!==document.body&&!(/auto|scroll/.test(getComputedStyle(box).overflowY)&&box.scrollHeight>box.clientHeight)) box=box.parentElement;
+    const imFenster=box&&box!==document.body;
+    const weg=inp.getBoundingClientRect().top-(imFenster?box.getBoundingClientRect().top+10:70);
+    (imFenster?box:window).scrollBy({top:weg,behavior:'smooth'});
+  }
+}
+function psuTaste(e, inp){
+  if(e.key==='Escape'){ psuZu(inp); return; }
+  const zeilen=[...inp.nextElementSibling.querySelectorAll('.psu-z')];
+  if(!zeilen.length) return;
+  let i=zeilen.findIndex(z=>z.classList.contains('psu-akt'));
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    if(i>=0) zeilen[i].classList.remove('psu-akt');
+    i=Math.max(0,Math.min(zeilen.length-1,i+(e.key==='ArrowDown'?1:-1)));
+    zeilen[i].classList.add('psu-akt'); zeilen[i].scrollIntoView({block:'nearest'});
+  } else if(e.key==='Enter'){
+    e.preventDefault(); psuWahl(zeilen[Math.max(0,i)]);
+  }
+}
+function psuWahl(zeile){
+  const inp=zeile.closest('.psu').querySelector('.psu-in'), sel=document.getElementById(inp.dataset.sel);
+  if(!sel) return;
+  sel.value=zeile.dataset.v;
+  sel.dispatchEvent(new Event('change',{bubbles:true}));   // z. B. Projekt-Eckdaten bei „Eigene Belege“ aktualisieren
+  psuZu(inp); inp.blur();
+  sel.classList.add('psu-ok'); setTimeout(()=>sel.classList.remove('psu-ok'),1500);
+}
+// Suchfeld ist nur zum Finden: beim Verlassen leeren, damit kein alter Suchtext neben einer anderen Auswahl stehen bleibt
+function psuZu(inp){
+  inp.value=''; inp._psuOben=false;
+  const liste=inp.nextElementSibling; liste.style.display='none'; liste.innerHTML='';
+}
+
 async function loadEingangsrechnungen(){
   try{
     const sel='id,projekt_id,ordner_name,absender,betreff,mail_datum,dateiname,storage_pfad,betrag_netto,betrag_brutto,betrag_mwst,betrag_status,betrag_hinweis,rechnungsnummer,status';
@@ -2871,7 +2957,7 @@ function renderRechOrdner(){
         return`<tr>
           <td>${esc(o.ordner_name)}${anzahl[o.ordner_name]?`<div style="font-size:11px;color:var(--t2)">${anzahl[o.ordner_name]} Rechnungen übernommen</div>`:''}</td>
           <td>${badge[st]}${st==='offen'&&o.vorschlag_projekt_id?'<div style="font-size:11px;color:var(--t2)">mit Vorschlag</div>':''}</td>
-          <td><select class="fs" id="ro-sel-${i}" style="min-width:220px;padding:6px 8px">
+          <td style="min-width:240px">${psuFeld('ro-sel-'+i,true)}<select class="fs" id="ro-sel-${i}" style="min-width:220px;padding:6px 8px">
             <option value="">— Projekt wählen —</option>
             ${erlaubt.map(p=>`<option value="${p.id}" ${String(p.id)===String(vorwahl)?'selected':''}>${esc(p.name)}</option>`).join('')}
           </select></td>
@@ -3061,7 +3147,8 @@ function renderAusgangsbelege(){
           ${badge[st]}
         </div>
         ${n?`<details class="ab-belege"><summary>Belege ansehen (${n})</summary>${belege.map(abBelegZeile).join('')}</details>`:''}
-        <div class="ab-aktion">
+        <div style="margin-top:8px">${psuFeld('ag-sel-'+i,true)}</div>
+        <div class="ab-aktion" style="margin-top:0">
           <select class="fs" id="ag-sel-${i}" onchange="document.getElementById('ag-info-${i}').innerHTML=abProjektInfo(this.value)">
             <option value="">— Projekt wählen —</option>
             ${wahl.map(p=>`<option value="${p.id}" ${String(p.id)===String(vorwahl)?'selected':''}>${esc(p.name)}</option>`).join('')}
@@ -6452,6 +6539,7 @@ function openPdfReview(){
         <input type="date" class="fi" id="pr-faellig-${i}" value="${r.faellig||''}" style="${r.faellig?'border-color:var(--green)':''}">
       </div>
       <div class="fg"><label class="fl">Projekt *</label>
+        ${psuFeld('pr-proj-'+i)}
         <select class="fs" id="pr-proj-${i}" style="${r.matched?'border-color:var(--green)':''}">${projOptions}</select>
       </div>
       <div class="frow">
