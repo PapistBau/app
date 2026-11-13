@@ -793,15 +793,12 @@ def main(nur_ordner=False):
 
     try:
         # Bestand aus Supabase. Vorgabe Andy: Rechnungen NUR für Projekte, die laufend oder abgeschlossen sind
-        # UND auf die Stunden gebucht wurden (keine Angebote/Anfragen, keine Projekte ohne Stunden).
+        # (keine Angebote/Anfragen). Seit 13.11.2026 auch ohne gebuchte Stunden (Andy).
         projekte_roh = sb_select_all("projects", "id,name:data->>name,typ:data->>typ")
         geloescht = {r["id"] for r in sb_select_all("deleted_ids", "id", "&id=like.projects:*")}
-        mit_stunden = {z["projId"] for z in sb_select_all("zeiten", "projId:data->>projId,std:data->>std")
-                       if z["projId"] and float(z["std"] or 0) > 0}
         projekte = [(p["id"], p["name"] or "") for p in projekte_roh
                     if f"projects:{p['id']}" not in geloescht
-                    and p["typ"] in ("laufend", "abgeschlossen")
-                    and str(p["id"]) in mit_stunden]
+                    and p["typ"] in ("laufend", "abgeschlossen")]
         erlaubt = {pid for pid, _ in projekte}
         mapping = {m["ordner_name"]: m for m in
                    sb_select_all("rechnungsordner_mapping", "ordner_name,projekt_id,quelle,vorschlag_projekt_id")}
